@@ -1,0 +1,34 @@
+{
+  "name": "public-web",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/public-web/src",
+  "tags": ["type:web-app", "scope:public-web"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vite build --config apps/public-web/vite.config.ts"
+      },
+      "outputs": ["{workspaceRoot}/dist/apps/public-web"]
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vite --config apps/public-web/vite.config.ts --host 0.0.0.0"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p apps/public-web/tsconfig.app.json --noEmit"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --max-old-space-size=4096 ./node_modules/eslint/bin/eslint.js apps/public-web/src --ext .ts,.tsx"
+      }
+    }
+  }
+}

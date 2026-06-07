@@ -1,0 +1,8 @@
+{
+  "name": "@rifa/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "root": true,
+  "ignorePatterns": ["dist/**", "node_modules/**", ".nx/**"],
+  "plugins": ["@nx", "@typescript-eslint"],
+  "overrides": [
+    {
+      "files": ["*.ts", "*.tsx"],
+      "parser": "@typescript-eslint/parser",
+      "parserOptions": {
+        "project": [
+          "./tsconfig.base.json",
+          "./apps/*/tsconfig.app.json",
+          "./packages/*/tsconfig.lib.json"
+        ]
+      },
+      "extends": ["plugin:@typescript-eslint/recommended"],
+      "rules": {
+        "@nx/enforce-module-boundaries": [
+          "error",
+          {
+            "enforceBuildableLibDependency": true,
+            "allow": [],
+            "depConstraints": [
+              {
+                "sourceTag": "type:web-app",
+                "onlyDependOnLibsWithTags": ["scope:shared", "scope:validation", "scope:config"]
+              },
+              {
+                "sourceTag": "type:api-app",
+                "onlyDependOnLibsWithTags": [
+                  "scope:shared",
+                  "scope:validation",
+                  "scope:config",
+                  "scope:db"
+                ]
+              },
+              {
+                "sourceTag": "scope:validation",
+                "onlyDependOnLibsWithTags": ["scope:shared"]
+              },
+              {
+                "sourceTag": "scope:config",
+                "onlyDependOnLibsWithTags": ["scope:shared"]
+              },
+              {
+                "sourceTag": "scope:db",
+                "onlyDependOnLibsWithTags": ["scope:shared", "scope:config"]
+              },
+              {
+                "sourceTag": "scope:shared",
+                "onlyDependOnLibsWithTags": ["scope:shared"]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

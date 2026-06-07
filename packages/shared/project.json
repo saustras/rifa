@@ -1,0 +1,22 @@
+{
+  "name": "shared",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "packages/shared/src",
+  "tags": ["scope:shared"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": { "command": "tsc -p packages/shared/tsconfig.lib.json" },
+      "outputs": ["{workspaceRoot}/dist/packages/shared"]
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": { "command": "tsc -p packages/shared/tsconfig.lib.json --noEmit" }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": { "command": "eslint packages/shared/src --ext .ts" }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@rifa/validation",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@rifa/shared": "workspace:*"
+  }
+}

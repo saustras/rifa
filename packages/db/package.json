@@ -1,0 +1,14 @@
+{
+  "name": "@rifa/db",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.4.5",
+    "@rifa/config": "workspace:*",
+    "@rifa/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  }
+}

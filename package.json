@@ -1,0 +1,47 @@
+{
+  "name": "rifa-platform",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "nx": "nx",
+    "projects": "nx show projects",
+    "lint": "nx run-many -t lint --all --parallel=1",
+    "typecheck": "nx run-many -t typecheck --all --parallel=1",
+    "format:check": "prettier --check .",
+    "build": "nx run-many -t build --all --parallel=1",
+    "db:generate": "drizzle-kit generate --config packages/db/drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config packages/db/drizzle.config.ts",
+    "db:studio": "drizzle-kit studio --config packages/db/drizzle.config.ts",
+    "db:seed": "tsx packages/db/src/seed.ts",
+    "db:check": "drizzle-kit check --config packages/db/drizzle.config.ts",
+    "api:dev": "pnpm nx serve api"
+  },
+  "devDependencies": {
+    "@nx/eslint-plugin": "^20.4.6",
+    "@nx/js": "^20.4.6",
+    "@types/node": "^22.10.2",
+    "@types/nodemailer": "^6.4.17",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "@vitejs/plugin-react": "^6.0.2",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^8.57.1",
+    "nx": "^20.4.6",
+    "prettier": "^3.4.2",
+    "tsx": "^4.22.3",
+    "typescript": "^5.7.2",
+    "vite": "^8.0.13",
+    "zod": "^3.24.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": ">=0.25.0",
+      "minimatch": ">=9.0.7",
+      "picomatch": ">=4.0.4",
+      "tmp": ">=0.2.6"
+    }
+  }
+}

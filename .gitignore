@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.nx/
+coverage/
+packages/db/pglite-data/
+packages/db/proofs/
+.env
+.env.*
+!.env.example
+*.log
+.playwright-mcp/

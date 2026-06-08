@@ -29,6 +29,11 @@ services:
       PORT: 3000
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       API_DEV_TOKEN: ${API_DEV_TOKEN:?API_DEV_TOKEN is required}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+      ADMIN_SELLER_ID: ${ADMIN_SELLER_ID:-seller_demo}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      ADMIN_JWT_TTL_SECONDS: ${ADMIN_JWT_TTL_SECONDS:-28800}
       PROOF_STORAGE_DIR: /data/proofs
       CAMPAIGN_ASSETS_DIR: /data/campaign-assets
       EMAIL_FROM: ${EMAIL_FROM:-}

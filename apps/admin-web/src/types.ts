@@ -31,8 +31,24 @@ export type AdminView =
   | 'settings';
 
 export interface AdminCredentials {
-  readonly apiKey: string;
+  readonly token: string;
   readonly sellerId: string;
+}
+
+export interface AdminUser {
+  readonly username: string;
+  readonly sellerId: string;
+}
+
+export interface AdminSession {
+  readonly token: string;
+  readonly expiresAt: number;
+  readonly user: AdminUser;
+}
+
+export interface AdminLoginCredentials {
+  readonly username: string;
+  readonly password: string;
 }
 
 export interface OrderListRow {

@@ -3,13 +3,15 @@ import { createRoot } from 'react-dom/client';
 
 import { AdminShell } from './components/AdminShell';
 import {
+  clearStoredSession,
   fetchAuditLogs,
   fetchCustomers,
   fetchNotifications,
   fetchOrders,
   fetchRaffles,
-  getStoredCredentials,
-  persistCredentials,
+  getStoredSession,
+  loginAdmin,
+  toAdminCredentials,
 } from './api';
 import { AuditPage } from './pages/AuditPage';
 import { CampaignFormPage } from './pages/CampaignFormPage';
@@ -22,10 +24,10 @@ import { SettingsPage } from './pages/SettingsPage';
 import {
   REQUEST_STATUS,
   type AdminAuditLog,
-  type AdminCredentials,
   type AdminCustomer,
   type AdminNotificationLog,
   type AdminRaffle,
+  type AdminSession,
   type AdminView,
   type OrderListRow,
   type RequestStatus,
@@ -34,10 +36,13 @@ import { getMetrics } from './utils';
 import './styles.css';
 
 function App() {
+  const [session, setSession] = useState<AdminSession | null>(getStoredSession);
+  const [loginUsername, setLoginUsername] = useState('admin');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginStatus, setLoginStatus] = useState<RequestStatus>(REQUEST_STATUS.idle);
+  const [loginMessage, setLoginMessage] = useState('');
   const [currentView, setCurrentView] = useState<AdminView>('dashboard');
   const [editingRaffleId, setEditingRaffleId] = useState<string | null>(null);
-  const [credentials, setCredentials] = useState<AdminCredentials>(getStoredCredentials);
-  const [draftCredentials, setDraftCredentials] = useState<AdminCredentials>(getStoredCredentials);
   const [orders, setOrders] = useState<readonly OrderListRow[]>([]);
   const [raffles, setRaffles] = useState<readonly AdminRaffle[]>([]);
   const [customers, setCustomers] = useState<readonly AdminCustomer[]>([]);
@@ -48,6 +53,14 @@ function App() {
   const [message, setMessage] = useState<string>('');
 
   const loadData = useCallback(async (): Promise<void> => {
+    if (!session) {
+      setOrdersStatus(REQUEST_STATUS.idle);
+      setRafflesStatus(REQUEST_STATUS.idle);
+      return;
+    }
+
+    const credentials = toAdminCredentials(session);
+
     setOrdersStatus(REQUEST_STATUS.loading);
     setRafflesStatus(REQUEST_STATUS.loading);
     setMessage('');
@@ -74,16 +87,38 @@ function App() {
       setRafflesStatus(REQUEST_STATUS.error);
       setMessage(error instanceof Error ? error.message : 'No se pudieron cargar los datos.');
     }
-  }, [credentials]);
+  }, [session]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
-  const handleCredentialsSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleLoginSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    persistCredentials(draftCredentials);
-    setCredentials(draftCredentials);
+
+    setLoginStatus(REQUEST_STATUS.loading);
+    setLoginMessage('');
+
+    try {
+      const nextSession = await loginAdmin({ username: loginUsername, password: loginPassword });
+      setSession(nextSession);
+      setLoginPassword('');
+      setLoginStatus(REQUEST_STATUS.success);
+    } catch (error: unknown) {
+      setLoginStatus(REQUEST_STATUS.error);
+      setLoginMessage(error instanceof Error ? error.message : 'No se pudo iniciar sesión.');
+    }
+  };
+
+  const handleLogout = () => {
+    clearStoredSession();
+    setSession(null);
+    setOrders([]);
+    setRaffles([]);
+    setCustomers([]);
+    setAuditLogs([]);
+    setNotifications([]);
+    setCurrentView('dashboard');
   };
 
   const handleCampaignFormDone = () => {
@@ -97,6 +132,12 @@ function App() {
   const activeRaffleSlug = activeCampaign?.slug ?? raffles[0]?.slug;
 
   const renderPage = () => {
+    if (!session) {
+      return null;
+    }
+
+    const credentials = toAdminCredentials(session);
+
     if (currentView === 'campaign-form') {
       return (
         <CampaignFormPage
@@ -162,23 +203,68 @@ function App() {
       case 'audit':
         return <AuditPage auditLogs={auditLogs} notifications={notifications} />;
       case 'settings':
-        return (
-          <SettingsPage
-            draftCredentials={draftCredentials}
-            onChange={setDraftCredentials}
-            onSubmit={handleCredentialsSubmit}
-          />
-        );
+        return <SettingsPage session={session} onLogout={handleLogout} />;
       default:
         return null;
     }
   };
+
+  if (!session) {
+    return (
+      <main className="login-page">
+        <section className="login-card" aria-labelledby="login-title">
+          <div className="login-brand" aria-hidden="true">
+            <span className="sidebar-brand-mark">
+              <svg viewBox="0 0 40 40" fill="none">
+                <circle cx="20" cy="20" r="18" stroke="#F4B21B" strokeWidth="3" />
+                <circle cx="20" cy="20" r="6" fill="#F4B21B" />
+              </svg>
+            </span>
+          </div>
+          <h1 id="login-title">Admin ORYUM</h1>
+          <p className="muted">Ingresa con tu usuario administrador para gestionar la rifa.</p>
+
+          {loginMessage ? (
+            <p className="alert" role="alert">
+              {loginMessage}
+            </p>
+          ) : null}
+
+          <form className="login-form" onSubmit={(event) => void handleLoginSubmit(event)}>
+            <label className="field">
+              <span>Usuario</span>
+              <input
+                autoComplete="username"
+                value={loginUsername}
+                onChange={(event) => setLoginUsername(event.target.value)}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>Contraseña</span>
+              <input
+                autoComplete="current-password"
+                type="password"
+                value={loginPassword}
+                onChange={(event) => setLoginPassword(event.target.value)}
+                required
+              />
+            </label>
+            <button type="submit" className="btn btn-primary" disabled={loginStatus === 'loading'}>
+              {loginStatus === 'loading' ? 'Ingresando…' : 'Ingresar'}
+            </button>
+          </form>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <AdminShell
       currentView={currentView}
       pendingCount={pendingCount}
       activeRaffleSlug={activeRaffleSlug}
+      adminUsername={session.user.username}
       onNavigate={(view) => {
         if (view !== 'campaign-form') {
           setEditingRaffleId(null);
@@ -186,6 +272,7 @@ function App() {
         setCurrentView(view);
       }}
       onRefresh={() => void loadData()}
+      onLogout={handleLogout}
     >
       {message && currentView !== 'orders' ? (
         <p className="alert" role="status">

@@ -17,8 +17,10 @@ interface AdminShellProps {
   readonly currentView: AdminView;
   readonly pendingCount: number;
   readonly activeRaffleSlug?: string | undefined;
+  readonly adminUsername: string;
   readonly onNavigate: (view: AdminView) => void;
   readonly onRefresh: () => void;
+  readonly onLogout: () => void;
   readonly children: ReactNode;
 }
 
@@ -26,8 +28,10 @@ export const AdminShell = ({
   currentView,
   pendingCount,
   activeRaffleSlug,
+  adminUsername,
   onNavigate,
   onRefresh,
+  onLogout,
   children,
 }: AdminShellProps) => {
   const shellView = currentView === 'campaign-form' ? 'campaigns' : currentView;
@@ -104,8 +108,8 @@ export const AdminShell = ({
             O
           </span>
           <div>
-            <strong>ORYUM S.A.S.</strong>
-            <small>Vendedor verificado</small>
+            <strong>{adminUsername}</strong>
+            <small>Administrador</small>
           </div>
         </div>
       </aside>
@@ -130,6 +134,9 @@ export const AdminShell = ({
             </a>
             <button type="button" className="btn btn-ghost" onClick={onRefresh}>
               Actualizar
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={onLogout}>
+              Salir
             </button>
           </div>
         </header>

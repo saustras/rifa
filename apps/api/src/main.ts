@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 
 import {
@@ -86,9 +87,30 @@ interface AdminContext {
   readonly sellerId: string;
 }
 
+const ADMIN_ROLES = {
+  admin: 'admin',
+} as const;
+
+type AdminRole = (typeof ADMIN_ROLES)[keyof typeof ADMIN_ROLES];
+
+interface AdminTokenPayload {
+  readonly sub: string;
+  readonly sellerId: string;
+  readonly role: AdminRole;
+  readonly exp: number;
+}
+
 type JsonResponse = unknown;
 
 const API_DEV_TOKEN = process.env.API_DEV_TOKEN ?? 'dev-local-token';
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
+const ADMIN_PASSWORD =
+  process.env.ADMIN_PASSWORD ?? (process.env.NODE_ENV === 'production' ? undefined : '123456789ui');
+const ADMIN_SELLER_ID = process.env.ADMIN_SELLER_ID ?? 'seller_demo';
+const JWT_SECRET =
+  process.env.JWT_SECRET ??
+  (process.env.NODE_ENV === 'production' ? undefined : 'dev-only-rifa-jwt-secret');
+const ADMIN_JWT_TTL_SECONDS = Number(process.env.ADMIN_JWT_TTL_SECONDS ?? 60 * 60 * 8);
 const PROOF_STORAGE_DIR = process.env.PROOF_STORAGE_DIR ?? './packages/db/proofs';
 const CAMPAIGN_ASSETS_DIR = process.env.CAMPAIGN_ASSETS_DIR ?? './packages/db/campaign-assets';
 const COMPRESSED_PROOF_MIME_TYPE = 'image/webp';
@@ -117,7 +139,7 @@ const sendJson = (response: ServerResponse, statusCode: number, body: JsonRespon
     'content-type': 'application/json; charset=utf-8',
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'GET, POST, PATCH, OPTIONS',
-    'access-control-allow-headers': 'content-type, x-api-key, x-seller-id',
+    'access-control-allow-headers': 'authorization, content-type, x-api-key, x-seller-id',
   });
   response.end(JSON.stringify(body));
 };
@@ -132,9 +154,9 @@ const sendText = (
   response.writeHead(statusCode, {
     'content-type': contentType,
     'content-length': payload.byteLength,
-    'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-    'access-control-allow-headers': 'content-type, x-api-key, x-seller-id',
+          'access-control-allow-origin': '*',
+          'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+          'access-control-allow-headers': 'authorization, content-type, x-api-key, x-seller-id',
   });
   response.end(payload);
 };
@@ -151,7 +173,7 @@ const sendBinary = (
     'cache-control': 'private, max-age=60',
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'GET, POST, PATCH, OPTIONS',
-    'access-control-allow-headers': 'content-type, x-api-key, x-seller-id',
+    'access-control-allow-headers': 'authorization, content-type, x-api-key, x-seller-id',
   });
   response.end(body);
 };
@@ -180,6 +202,99 @@ const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
   }
 
   return JSON.parse(rawBody) as unknown;
+};
+
+const toBase64Url = (input: string | Buffer): string =>
+  Buffer.from(input)
+    .toString('base64')
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '');
+
+const fromBase64Url = (input: string): string => {
+  const normalized = input.replaceAll('-', '+').replaceAll('_', '/');
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
+
+  return Buffer.from(padded, 'base64').toString('utf8');
+};
+
+const secureEquals = (left: string, right: string): boolean => {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+};
+
+const signAdminToken = (payload: AdminTokenPayload): string => {
+  if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET is required for admin login.');
+  }
+
+  const header = toBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const body = toBase64Url(JSON.stringify(payload));
+  const signature = toBase64Url(createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest());
+
+  return `${header}.${body}.${signature}`;
+};
+
+const isAdminTokenPayload = (value: unknown): value is AdminTokenPayload =>
+  typeof value === 'object' &&
+  value !== null &&
+  'sub' in value &&
+  typeof value.sub === 'string' &&
+  'sellerId' in value &&
+  typeof value.sellerId === 'string' &&
+  'role' in value &&
+  value.role === ADMIN_ROLES.admin &&
+  'exp' in value &&
+  typeof value.exp === 'number';
+
+const verifyAdminToken = (token: string): AdminTokenPayload | undefined => {
+  if (!JWT_SECRET) {
+    return undefined;
+  }
+
+  const [header, body, signature] = token.split('.');
+
+  if (!header || !body || !signature) {
+    return undefined;
+  }
+
+  const expectedSignature = toBase64Url(
+    createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest(),
+  );
+
+  if (!secureEquals(signature, expectedSignature)) {
+    return undefined;
+  }
+
+  let payload: unknown;
+
+  try {
+    payload = JSON.parse(fromBase64Url(body)) as unknown;
+  } catch {
+    return undefined;
+  }
+
+  if (!isAdminTokenPayload(payload)) {
+    return undefined;
+  }
+
+  if (payload.exp <= Math.floor(Date.now() / 1000)) {
+    return undefined;
+  }
+
+  return payload;
+};
+
+const getBearerToken = (request: IncomingMessage): string | undefined => {
+  const authorization = getHeader(request, 'authorization');
+
+  if (!authorization?.startsWith('Bearer ')) {
+    return undefined;
+  }
+
+  return authorization.slice('Bearer '.length).trim();
 };
 
 const decodeBase64Image = (dataBase64: string): Buffer => {
@@ -574,6 +689,21 @@ const persistCompressedProof = async (
 };
 
 const authorizeAdmin = (request: IncomingMessage): AdminContext | ErrorResponse => {
+  const bearerToken = getBearerToken(request);
+
+  if (bearerToken) {
+    const payload = verifyAdminToken(bearerToken);
+
+    if (!payload) {
+      return {
+        error: 'unauthorized',
+        message: 'Invalid or expired admin token',
+      };
+    }
+
+    return { sellerId: payload.sellerId };
+  }
+
   const apiKey = getHeader(request, 'x-api-key');
   const sellerId = getHeader(request, 'x-seller-id');
 
@@ -592,6 +722,98 @@ const authorizeAdmin = (request: IncomingMessage): AdminContext | ErrorResponse 
   }
 
   return { sellerId };
+};
+
+interface AdminLoginBody {
+  readonly username: string;
+  readonly password: string;
+}
+
+const isAdminLoginBody = (value: unknown): value is AdminLoginBody =>
+  typeof value === 'object' &&
+  value !== null &&
+  'username' in value &&
+  typeof value.username === 'string' &&
+  'password' in value &&
+  typeof value.password === 'string';
+
+const handleAdminAuth = async (
+  request: IncomingMessage,
+  response: ServerResponse,
+  pathname: string,
+): Promise<boolean> => {
+  if (!pathname.startsWith('/api/admin/auth')) {
+    return false;
+  }
+
+  if (pathname === '/api/admin/auth/login' && request.method === 'POST') {
+    if (!ADMIN_PASSWORD || !JWT_SECRET) {
+      sendJson(response, 503, {
+        error: 'admin_auth_not_configured',
+        message: 'Admin authentication is not configured.',
+      });
+      return true;
+    }
+
+    const body = await readJsonBody(request);
+
+    if (!isAdminLoginBody(body)) {
+      sendJson(response, 400, {
+        error: 'invalid_login_request',
+        message: 'Username and password are required.',
+      });
+      return true;
+    }
+
+    const username = body.username.trim();
+    const password = body.password;
+
+    if (!secureEquals(username, ADMIN_USERNAME) || !secureEquals(password, ADMIN_PASSWORD)) {
+      sendJson(response, 401, {
+        error: 'invalid_credentials',
+        message: 'Usuario o contraseña inválidos.',
+      });
+      return true;
+    }
+
+    const expiresAt = Math.floor(Date.now() / 1000) + ADMIN_JWT_TTL_SECONDS;
+    const token = signAdminToken({
+      sub: username,
+      sellerId: ADMIN_SELLER_ID,
+      role: ADMIN_ROLES.admin,
+      exp: expiresAt,
+    });
+
+    sendJson(response, 200, {
+      token,
+      expiresAt,
+      user: {
+        username,
+        sellerId: ADMIN_SELLER_ID,
+      },
+    });
+    return true;
+  }
+
+  if (pathname === '/api/admin/auth/me' && request.method === 'GET') {
+    const context = authorizeAdmin(request);
+
+    if (isErrorResponse(context)) {
+      sendJson(response, 401, context);
+      return true;
+    }
+
+    sendJson(response, 200, {
+      user: {
+        username: ADMIN_USERNAME,
+        sellerId: context.sellerId,
+      },
+    });
+    return true;
+  }
+
+  sendJson(response, 404, { error: 'not_found', path: pathname });
+  return true;
 };
 
 const isErrorResponse = (value: AdminContext | ErrorResponse): value is ErrorResponse =>
@@ -1489,7 +1711,7 @@ export const createRifaApiServer = () =>
         response.writeHead(204, {
           'access-control-allow-origin': '*',
           'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-          'access-control-allow-headers': 'content-type, x-api-key, x-seller-id',
+    'access-control-allow-headers': 'authorization, content-type, x-api-key, x-seller-id',
           'access-control-max-age': '86400',
         });
         response.end();
@@ -1504,6 +1726,10 @@ export const createRifaApiServer = () =>
       if (request.method === 'GET' && pathname === '/api/health/db') {
         const dbHealth = await getDatabaseHealth();
         sendJson(response, dbHealth.ok ? 200 : 503, dbHealth);
+        return;
+      }
+
+      if (await handleAdminAuth(request, response, pathname)) {
         return;
       }
 

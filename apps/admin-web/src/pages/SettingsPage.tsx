@@ -1,16 +1,15 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 
 import { fetchDbHealth } from '../api';
 import { API_BASE_URL, PUBLIC_WEB_URL } from '../config';
-import type { AdminCredentials } from '../types';
+import type { AdminSession } from '../types';
 
 interface SettingsPageProps {
-  readonly draftCredentials: AdminCredentials;
-  readonly onChange: (credentials: AdminCredentials) => void;
-  readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  readonly session: AdminSession | null;
+  readonly onLogout: () => void;
 }
 
-export const SettingsPage = ({ draftCredentials, onChange, onSubmit }: SettingsPageProps) => {
+export const SettingsPage = ({ session, onLogout }: SettingsPageProps) => {
   const [dbHealth, setDbHealth] = useState<{
     ok: boolean;
     sellersCount?: number;
@@ -26,38 +25,39 @@ export const SettingsPage = ({ draftCredentials, onChange, onSubmit }: SettingsP
   return (
     <section className="settings-layout">
       <article className="panel">
-        <h2>Credenciales de acceso</h2>
+        <h2>Sesión de administrador</h2>
         <p className="muted">
-          Configuración temporal para desarrollo. En producción esto será reemplazado por login
-          seguro.
+          El panel usa JWT enviado por header <code>Authorization</code>. Mantén el admin cerrado por
+          túnel hasta configurar dominio y HTTPS.
         </p>
 
-        <form className="settings-form" onSubmit={onSubmit}>
-          <label className="field">
-            <span>API key</span>
-            <input
-              value={draftCredentials.apiKey}
-              onChange={(event) => onChange({ ...draftCredentials, apiKey: event.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>Seller ID</span>
-            <input
-              value={draftCredentials.sellerId}
-              onChange={(event) => onChange({ ...draftCredentials, sellerId: event.target.value })}
-            />
-          </label>
-          <button type="submit" className="btn btn-primary">
-            Guardar y recargar
-          </button>
-        </form>
+        <dl className="health-list">
+          <div>
+            <dt>Usuario</dt>
+            <dd className="mono muted">{session?.user.username ?? 'Sin sesión'}</dd>
+          </div>
+          <div>
+            <dt>Seller ID</dt>
+            <dd className="mono muted">{session?.user.sellerId ?? 'Sin sesión'}</dd>
+          </div>
+          <div>
+            <dt>Expira</dt>
+            <dd className="mono muted">
+              {session ? new Date(session.expiresAt * 1000).toLocaleString() : 'Sin sesión'}
+            </dd>
+          </div>
+        </dl>
+
+        <button type="button" className="btn btn-primary" onClick={onLogout}>
+          Cerrar sesión
+        </button>
       </article>
 
       <article className="panel">
         <h2>Estado del sistema</h2>
         <dl className="health-list">
           <div>
-            <dt>Base de datos (PGlite)</dt>
+            <dt>Base de datos</dt>
             <dd>
               {dbHealth === null ? (
                 <span className="muted">Verificando…</span>
@@ -91,10 +91,11 @@ export const SettingsPage = ({ draftCredentials, onChange, onSubmit }: SettingsP
         <h2>Variables (.env.example)</h2>
         <ul className="env-hints muted">
           <li>
-            <code>DATABASE_URL</code> — PGlite local en <code>./packages/db/pglite-data</code>
+            <code>DATABASE_URL</code> — PGlite local o PostgreSQL real en producción
           </li>
           <li>
-            <code>API_DEV_TOKEN</code> — token para header <code>x-api-key</code>
+            <code>ADMIN_USERNAME</code>, <code>ADMIN_PASSWORD</code>, <code>JWT_SECRET</code> — login del
+            panel admin
           </li>
           <li>
             <code>SMTP_*</code> — correos al comprador al aprobar/rechazar

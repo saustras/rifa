@@ -2,10 +2,12 @@ import type {
   AdminAuditLog,
   AdminCredentials,
   AdminCustomer,
+  AdminLoginCredentials,
   AdminNotificationLog,
   AdminPrize,
   AdminRaffle,
   AdminRaffleNumber,
+  AdminSession,
   CreateRaffleInput,
   DrawResult,
   OrderDetail,
@@ -14,23 +16,101 @@ import type {
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+const ADMIN_SESSION_KEY = 'rifa-admin-session';
 
-export const DEFAULT_CREDENTIALS: AdminCredentials = {
-  apiKey: 'dev-local-token',
-  sellerId: 'seller_demo',
+const isAdminSession = (value: unknown): value is AdminSession => {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  return (
+    'token' in value &&
+    typeof value.token === 'string' &&
+    'expiresAt' in value &&
+    typeof value.expiresAt === 'number' &&
+    'user' in value &&
+    typeof value.user === 'object' &&
+    value.user !== null &&
+    'username' in value.user &&
+    typeof value.user.username === 'string' &&
+    'sellerId' in value.user &&
+    typeof value.user.sellerId === 'string'
+  );
 };
 
-export const getStoredCredentials = (): AdminCredentials => {
-  const apiKey = window.localStorage.getItem('rifa-admin-api-key') ?? DEFAULT_CREDENTIALS.apiKey;
-  const sellerId =
-    window.localStorage.getItem('rifa-admin-seller-id') ?? DEFAULT_CREDENTIALS.sellerId;
+export const getStoredSession = (): AdminSession | null => {
+  const rawSession = window.localStorage.getItem(ADMIN_SESSION_KEY);
 
-  return { apiKey, sellerId };
+  if (!rawSession) {
+    return null;
+  }
+
+  let parsedSession: unknown;
+
+  try {
+    parsedSession = JSON.parse(rawSession) as unknown;
+  } catch {
+    window.localStorage.removeItem(ADMIN_SESSION_KEY);
+    return null;
+  }
+
+  if (!isAdminSession(parsedSession)) {
+    window.localStorage.removeItem(ADMIN_SESSION_KEY);
+    return null;
+  }
+
+  if (parsedSession.expiresAt <= Math.floor(Date.now() / 1000)) {
+    window.localStorage.removeItem(ADMIN_SESSION_KEY);
+    return null;
+  }
+
+  return parsedSession;
 };
 
-export const persistCredentials = ({ apiKey, sellerId }: AdminCredentials): void => {
-  window.localStorage.setItem('rifa-admin-api-key', apiKey);
-  window.localStorage.setItem('rifa-admin-seller-id', sellerId);
+export const persistSession = (session: AdminSession): void => {
+  window.localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session));
+};
+
+export const clearStoredSession = (): void => {
+  window.localStorage.removeItem(ADMIN_SESSION_KEY);
+};
+
+export const toAdminCredentials = (session: AdminSession): AdminCredentials => ({
+  token: session.token,
+  sellerId: session.user.sellerId,
+});
+
+const getResponseMessage = (body: unknown): string => {
+  if (
+    typeof body === 'object' &&
+    body !== null &&
+    'message' in body &&
+    typeof body.message === 'string'
+  ) {
+    return body.message;
+  }
+
+  return 'No se pudo completar la solicitud.';
+};
+
+export const loginAdmin = async (credentials: AdminLoginCredentials): Promise<AdminSession> => {
+  const response = await fetch(`${API_BASE_URL}/api/admin/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(credentials),
+  });
+  const body = (await response.json().catch(() => ({}))) as unknown;
+
+  if (!response.ok) {
+    throw new Error(getResponseMessage(body));
+  }
+
+  if (!isAdminSession(body)) {
+    throw new Error('Respuesta de login inválida.');
+  }
+
+  persistSession(body);
+  return body;
 };
 
 const requestAdminJson = async <T>(
@@ -42,22 +122,14 @@ const requestAdminJson = async <T>(
     ...init,
     headers: {
       'content-type': 'application/json',
-      'x-api-key': credentials.apiKey,
-      'x-seller-id': credentials.sellerId,
+      authorization: `Bearer ${credentials.token}`,
       ...init?.headers,
     },
   });
   const body = (await response.json().catch(() => ({}))) as unknown;
 
   if (!response.ok) {
-    const message =
-      typeof body === 'object' &&
-      body !== null &&
-      'message' in body &&
-      typeof body.message === 'string'
-        ? body.message
-        : 'No se pudo completar la solicitud.';
-    throw new Error(message);
+    throw new Error(getResponseMessage(body));
   }
 
   return body as T;
@@ -69,8 +141,7 @@ export const requestAdminBlob = async (
 ): Promise<Blob> => {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
-      'x-api-key': credentials.apiKey,
-      'x-seller-id': credentials.sellerId,
+      authorization: `Bearer ${credentials.token}`,
     },
   });
 
@@ -319,8 +390,7 @@ export const downloadRaffleExportCsv = async (
 ): Promise<void> => {
   const response = await fetch(`${API_BASE_URL}/api/admin/raffles/${raffleId}/export`, {
     headers: {
-      'x-api-key': credentials.apiKey,
-      'x-seller-id': credentials.sellerId,
+      authorization: `Bearer ${credentials.token}`,
     },
   });
 
@@ -344,8 +414,7 @@ export const fetchDrawResult = async (
 ): Promise<DrawResult | null> => {
   const response = await fetch(`${API_BASE_URL}/api/admin/raffles/${raffleId}/draw-result`, {
     headers: {
-      'x-api-key': credentials.apiKey,
-      'x-seller-id': credentials.sellerId,
+      authorization: `Bearer ${credentials.token}`,
     },
   });
 

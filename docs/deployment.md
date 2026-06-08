@@ -75,6 +75,14 @@ Public endpoints in the lightweight setup:
 - API through public web proxy: `http://<vps-ip>/api/health`
 - Admin web: `http://<vps-ip>:8080/` if the provider firewall allows port `8080`.
 
+Admin login is JWT-based:
+
+- `ADMIN_USERNAME` — admin username.
+- `ADMIN_PASSWORD` — admin password stored only in `/opt/rifa/.env` or the deployment secret store.
+- `ADMIN_SELLER_ID` — seller tenant the admin controls.
+- `JWT_SECRET` — strong random signing secret.
+- `ADMIN_JWT_TTL_SECONDS` — token lifetime, defaults to 8 hours.
+
 If `8080` is blocked by the provider, keep it private and use an SSH tunnel from the local machine:
 
 ```powershell

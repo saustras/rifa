@@ -25,56 +25,61 @@ export const SettingsPage = ({ session, onLogout }: SettingsPageProps) => {
   return (
     <section className="settings-layout">
       <article className="panel">
-        <h2>Sesión de administrador</h2>
+        <h2>Cuenta</h2>
         <p className="muted">
-          El panel usa JWT enviado por header <code>Authorization</code>. Mantén el admin cerrado por
-          túnel hasta configurar dominio y HTTPS.
+          Administra el acceso al panel y mantén segura la operación de tus campañas.
         </p>
 
         <dl className="health-list">
           <div>
             <dt>Usuario</dt>
-            <dd className="mono muted">{session?.user.username ?? 'Sin sesión'}</dd>
+            <dd>{session?.user.username ?? 'Sin sesión'}</dd>
           </div>
           <div>
-            <dt>Seller ID</dt>
-            <dd className="mono muted">{session?.user.sellerId ?? 'Sin sesión'}</dd>
+            <dt>Rol</dt>
+            <dd>Administrador</dd>
           </div>
           <div>
-            <dt>Expira</dt>
-            <dd className="mono muted">
+            <dt>Sesión activa hasta</dt>
+            <dd>
               {session ? new Date(session.expiresAt * 1000).toLocaleString() : 'Sin sesión'}
             </dd>
           </div>
         </dl>
 
-        <button type="button" className="btn btn-primary" onClick={onLogout}>
-          Cerrar sesión
-        </button>
+        <div className="settings-actions">
+          <button type="button" className="btn btn-primary">
+            Cambiar contraseña
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={onLogout}>
+            Cerrar sesión
+          </button>
+        </div>
+        <p className="settings-note">
+          El cambio de contraseña quedará habilitado cuando conectemos el dominio con HTTPS.
+        </p>
       </article>
 
       <article className="panel">
-        <h2>Estado del sistema</h2>
+        <h2>Estado de la app</h2>
         <dl className="health-list">
           <div>
-            <dt>Base de datos</dt>
+            <dt>Ventas y campañas</dt>
             <dd>
               {dbHealth === null ? (
                 <span className="muted">Verificando…</span>
               ) : dbHealth.ok ? (
-                <span className="status-pill status-paid">
-                  Conectada · {dbHealth.sellersCount ?? 0} vendedor(es)
-                </span>
+                <span className="status-pill status-paid">Funcionando correctamente</span>
               ) : (
                 <span className="status-pill status-rejected">
-                  {dbHealth.error ?? 'Error de conexión'}
+                  {dbHealth.error ?? 'Requiere revisión'}
                 </span>
               )}
             </dd>
           </div>
           <div>
-            <dt>API</dt>
-            <dd className="mono muted">{API_BASE_URL || '(proxy /api)'}</dd>
+            <dt>Panel administrativo</dt>
+            <dd>{API_BASE_URL ? 'Conectado al servidor configurado' : 'Conectado al servidor principal'}</dd>
           </div>
           <div>
             <dt>Landing pública</dt>
@@ -88,20 +93,23 @@ export const SettingsPage = ({ session, onLogout }: SettingsPageProps) => {
       </article>
 
       <article className="panel">
-        <h2>Variables (.env.example)</h2>
-        <ul className="env-hints muted">
+        <h2>Preferencias</h2>
+        <ul className="settings-option-list">
           <li>
-            <code>DATABASE_URL</code> — PGlite local o PostgreSQL real en producción
+            <strong>Notificaciones</strong>
+            <span>Configura los avisos de pagos aprobados, rechazados y nuevos comprobantes.</span>
           </li>
           <li>
-            <code>ADMIN_USERNAME</code>, <code>ADMIN_PASSWORD</code>, <code>JWT_SECRET</code> — login del
-            panel admin
+            <strong>Datos de pago</strong>
+            <span>Actualiza las instrucciones, cuenta bancaria o QR desde cada campaña.</span>
           </li>
           <li>
-            <code>SMTP_*</code> — correos al comprador al aprobar/rechazar
+            <strong>Dominio y enlaces</strong>
+            <span>Cuando tengas dominio, conectaremos la landing y el panel con HTTPS.</span>
           </li>
           <li>
-            <code>TELEGRAM_*</code> — alerta al vendedor cuando suben comprobante
+            <strong>Respaldo de información</strong>
+            <span>Antes de vender en producción, activaremos copias de seguridad de la base de datos.</span>
           </li>
         </ul>
       </article>

@@ -92,14 +92,6 @@ export const AdminShell = ({
           ))}
         </nav>
 
-        <div className="sidebar-help">
-          <strong>¿Necesitas ayuda?</strong>
-          <p>Contacta soporte si tienes dudas sobre pagos o campañas.</p>
-          <a className="btn btn-sidebar" href="mailto:hola@oryumcampaigns.com">
-            Contactar soporte
-          </a>
-        </div>
-
         <div className="sidebar-user">
           <span className="sidebar-user-avatar" aria-hidden="true">
             O

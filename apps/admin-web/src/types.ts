@@ -1,6 +1,6 @@
 import type { RaffleLandingConfig } from '@rifa/shared';
 
-export type { RaffleLandingConfig } from '@rifa/shared';
+export type { RaffleLandingConfig, SellerSettings } from '@rifa/shared';
 
 export const ORDER_STATUS = {
   all: 'all',

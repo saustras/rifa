@@ -37,6 +37,7 @@ export const ensureLocalSchema = async (client: RuntimeDatabaseClient): Promise<
   await client.exec(`
     ALTER TABLE raffles ADD COLUMN IF NOT EXISTS landing_config jsonb;
     ALTER TABLE raffles ADD COLUMN IF NOT EXISTS payment_qr_image_url text;
+    ALTER TABLE sellers ADD COLUMN IF NOT EXISTS settings jsonb;
   `);
 };
 

@@ -187,7 +187,7 @@ function App() {
       case 'numbers':
         return <NumbersPage credentials={credentials} raffles={raffles} />;
       case 'settings':
-        return <SettingsPage session={session} onLogout={handleLogout} />;
+        return <SettingsPage credentials={credentials} session={session} onLogout={handleLogout} />;
       default:
         return null;
     }

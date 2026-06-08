@@ -9,7 +9,7 @@ import {
   RAFFLE_STATUSES,
   ROLES,
 } from '@rifa/shared';
-import type { RaffleLandingConfig } from '@rifa/shared';
+import type { RaffleLandingConfig, SellerSettings } from '@rifa/shared';
 import {
   boolean,
   index,
@@ -52,6 +52,7 @@ export const sellers = pgTable(
     name: text('name').notNull(),
     email: text('email').notNull(),
     phone: text('phone'),
+    settings: jsonb('settings').$type<SellerSettings | null>(),
     status: text('status').notNull().default('active'),
     telegramChatId: text('telegram_chat_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

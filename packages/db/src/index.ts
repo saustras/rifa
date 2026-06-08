@@ -57,6 +57,11 @@ export {
 export { blockSellerRaffleNumber, releaseSellerRaffleNumber } from './numbers-admin';
 export { listSellerRaffleOrdersForExport } from './exports';
 export type { RaffleOrderExportRow } from './exports';
+export {
+  getSellerSettings,
+  updateSellerDefaultPaymentQrImage,
+  updateSellerSettings,
+} from './seller-settings';
 export type {
   SellerAuditLogRow,
   SellerCustomerRow,

@@ -1,4 +1,4 @@
-import { DEFAULT_LANDING_CONFIG } from '@rifa/shared';
+import { DEFAULT_LANDING_CONFIG, DEFAULT_SELLER_SETTINGS } from '@rifa/shared';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { ImageUploadField } from '../components/ImageUploadField';
@@ -10,6 +10,7 @@ import {
   fetchDrawResult,
   fetchPrizes,
   fetchRaffleById,
+  fetchSellerSettings,
   registerDrawResult,
   updateRaffle,
   uploadRaffleCover,
@@ -22,6 +23,7 @@ import type {
   CreateRaffleInput,
   DrawResult,
   RaffleLandingConfig,
+  SellerSettings,
   UpdateRaffleInput,
 } from '../types';
 
@@ -47,7 +49,7 @@ const defaultForm: CreateRaffleInput = {
   numberMax: 99,
   numberPadding: 2,
   assignmentMode: 'customer_choice',
-  paymentMethodLabel: 'Nequi / Transferencia',
+  paymentMethodLabel: '',
   paymentAccountHolder: '',
   paymentAccountNumber: '',
   paymentInstructions: '',
@@ -67,6 +69,61 @@ const readLanding = (config?: RaffleLandingConfig | null): RaffleLandingConfig =
   ...(config ?? {}),
 });
 
+const readSellerSettings = (settings?: SellerSettings | null): SellerSettings => ({
+  ...DEFAULT_SELLER_SETTINGS,
+  ...(settings ?? {}),
+});
+
+const withSellerDefaults = (
+  landing: RaffleLandingConfig,
+  settings: SellerSettings,
+): RaffleLandingConfig => ({
+  ...landing,
+  brandName: landing.brandName ?? settings.brandName,
+  brandSubtitle: landing.brandSubtitle ?? settings.brandSubtitle,
+  organizerCompany: landing.organizerCompany ?? settings.organizerCompany,
+  organizerTaxId: landing.organizerTaxId ?? settings.organizerTaxId,
+  organizerAddress: landing.organizerAddress ?? settings.organizerAddress,
+  organizerCity: landing.organizerCity ?? settings.organizerCity,
+  footerPhone: landing.footerPhone ?? settings.supportPhone,
+  footerEmail: landing.footerEmail ?? settings.supportEmail,
+  footerHours: landing.footerHours ?? settings.supportHours,
+  instagramUrl: landing.instagramUrl ?? settings.instagramUrl,
+  facebookUrl: landing.facebookUrl ?? settings.facebookUrl,
+  youtubeUrl: landing.youtubeUrl ?? settings.youtubeUrl,
+  footerBrandText: landing.footerBrandText ?? settings.footerBrandText,
+  copyrightText: landing.copyrightText ?? settings.copyrightText,
+});
+
+const GLOBAL_LANDING_FIELDS = new Set<keyof RaffleLandingConfig>([
+  'brandName',
+  'brandSubtitle',
+  'organizerCompany',
+  'organizerTaxId',
+  'organizerAddress',
+  'organizerCity',
+  'footerPhone',
+  'footerEmail',
+  'footerHours',
+  'instagramUrl',
+  'facebookUrl',
+  'youtubeUrl',
+  'footerBrandText',
+  'copyrightText',
+]);
+
+const toCampaignLandingConfig = (landing: RaffleLandingConfig): RaffleLandingConfig => {
+  const campaignLanding: Record<string, string | undefined> = {};
+
+  for (const [key, value] of Object.entries(landing)) {
+    if (!GLOBAL_LANDING_FIELDS.has(key as keyof RaffleLandingConfig)) {
+      campaignLanding[key] = value;
+    }
+  }
+
+  return campaignLanding as RaffleLandingConfig;
+};
+
 const TAB_LABELS: Record<FormTab, string> = {
   general: 'General',
   marketing: 'Publicidad',
@@ -83,6 +140,13 @@ const MARKETING_TAB_LABELS: Record<MarketingTab, string> = {
   faq: 'Preguntas',
   footer: 'Resultado y pie',
 };
+
+const formatPreviewCurrency = (value: number, currency: string): string =>
+  new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: currency || 'COP',
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(value) ? value : 0);
 
 export const CampaignFormPage = ({
   credentials,
@@ -102,6 +166,7 @@ export const CampaignFormPage = ({
   const [isUploadingQr, setIsUploadingQr] = useState(false);
   const [activeTab, setActiveTab] = useState<FormTab>('general');
   const [activeMarketingTab, setActiveMarketingTab] = useState<MarketingTab>('cover');
+  const [sellerSettings, setSellerSettings] = useState<SellerSettings>(() => readSellerSettings());
   const [isLoading, setIsLoading] = useState(Boolean(raffleId));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
@@ -113,7 +178,30 @@ export const CampaignFormPage = ({
   const [drawNotes, setDrawNotes] = useState('');
 
   const isLiveCampaign = Boolean(raffleId && activeCampaignId === raffleId);
-  const landing = useMemo(() => readLanding(form.landingConfig), [form.landingConfig]);
+  const campaignLanding = useMemo(() => readLanding(form.landingConfig), [form.landingConfig]);
+  const landing = withSellerDefaults(campaignLanding, sellerSettings);
+
+  useEffect(() => {
+    let active = true;
+
+    void fetchSellerSettings(credentials)
+      .then((settings) => {
+        if (active) {
+          const nextSettings = readSellerSettings(settings);
+          setSellerSettings(nextSettings);
+          if (!raffleId) {
+            setPaymentQrImageUrl(
+              (current) => current ?? nextSettings.defaultPaymentQrImageUrl ?? null,
+            );
+          }
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, [credentials, raffleId]);
 
   useEffect(() => {
     if (!raffleId) {
@@ -222,7 +310,7 @@ export const CampaignFormPage = ({
     title: form.title,
     slug: form.slug,
     pricePerNumber: form.pricePerNumber,
-    landingConfig: readLanding(form.landingConfig),
+    landingConfig: toCampaignLandingConfig(readLanding(form.landingConfig)),
     ...(form.description ? { description: form.description } : {}),
     ...(form.status ? { status: form.status } : {}),
     ...(form.paymentMethodLabel ? { paymentMethodLabel: form.paymentMethodLabel } : {}),
@@ -233,6 +321,15 @@ export const CampaignFormPage = ({
     ...(form.paymentInstructions ? { paymentInstructions: form.paymentInstructions } : {}),
     ...(form.drawSourceName ? { drawSourceName: form.drawSourceName } : {}),
     ...(form.drawRule ? { drawRule: form.drawRule } : {}),
+  });
+
+  const buildCreatePayload = (): CreateRaffleInput => ({
+    ...(buildPayload() as CreateRaffleInput),
+    currency: form.currency ?? 'COP',
+    numberMin: form.numberMin ?? 0,
+    numberMax: form.numberMax,
+    numberPadding: form.numberPadding ?? 2,
+    assignmentMode: form.assignmentMode ?? 'customer_choice',
   });
 
   const persistCoverIfNeeded = async (targetRaffleId: string) => {
@@ -268,10 +365,7 @@ export const CampaignFormPage = ({
       if (raffleId) {
         await updateRaffle(credentials, raffleId, buildPayload());
       } else {
-        const created = await createRaffle(credentials, {
-          ...form,
-          landingConfig: readLanding(form.landingConfig),
-        });
+        const created = await createRaffle(credentials, buildCreatePayload());
         targetId = created.id;
       }
 
@@ -410,7 +504,9 @@ export const CampaignFormPage = ({
   const qrStatusNote = !raffleId
     ? pendingQrFile
       ? 'QR listo. Se subirá al servidor cuando guardes la campaña.'
-      : 'Puedes elegir el QR ahora; se sube al guardar si la campaña es nueva.'
+      : sellerSettings.defaultPaymentQrImageUrl
+        ? 'Usando el QR por defecto de Configuración. Sube uno aquí solo si esta campaña necesita otro.'
+        : 'Puedes elegir el QR ahora; se sube al guardar si la campaña es nueva.'
     : paymentQrImageUrl
       ? 'QR de pago guardado en la campaña.'
       : undefined;
@@ -422,6 +518,57 @@ export const CampaignFormPage = ({
     'Agrega el texto principal para ver cómo se sentirá la landing para tus compradores.';
   const previewPrizeLabel = landing.prizeLabel?.trim() || 'Foto del premio';
   const previewCtaLabel = landing.submitButtonLabel?.trim() || 'Comprar participación';
+  const previewBrandName = landing.brandName?.trim() || 'Tu marca';
+  const previewBrandSubtitle = landing.brandSubtitle?.trim() || 'Campaña promocional';
+  const previewPrice = formatPreviewCurrency(form.pricePerNumber, form.currency ?? 'COP');
+  const previewTrustCards = [landing.trustCardOneTitle, landing.trustCardTwoTitle]
+    .map((title) => title?.trim())
+    .filter(Boolean);
+  const previewSteps = [
+    [landing.stepOneTitle, landing.stepOneDescription],
+    [landing.stepTwoTitle, landing.stepTwoDescription],
+    [landing.stepThreeTitle, landing.stepThreeDescription],
+  ]
+    .map(([title, description], index) => ({
+      description: description?.trim() || 'Describe qué debe hacer el comprador en este paso.',
+      index: index + 1,
+      title: title?.trim() || `Paso ${index + 1}`,
+    }))
+    .filter((step) => step.title || step.description);
+  const previewPrizeDetails = [
+    [landing.prizeDetailOneLabel, landing.prizeDetailOneValue, landing.prizeDetailOneSub],
+    [landing.prizeDetailTwoLabel, landing.prizeDetailTwoValue, landing.prizeDetailTwoSub],
+    [landing.prizeDetailThreeLabel, landing.prizeDetailThreeValue, landing.prizeDetailThreeSub],
+  ].map(([label, value, sub], index) => ({
+    label: label?.trim() || `Detalle ${index + 1}`,
+    sub: sub?.trim(),
+    value: value?.trim() || 'Pendiente',
+  }));
+  const previewFaqs = [
+    [landing.faqOneQuestion, landing.faqOneAnswer],
+    [landing.faqTwoQuestion, landing.faqTwoAnswer],
+    [landing.faqThreeQuestion, landing.faqThreeAnswer],
+  ]
+    .map(([question, answer], index) => ({
+      answer: answer?.trim() || 'Agrega una respuesta clara para reducir dudas antes de comprar.',
+      question: question?.trim() || `Pregunta frecuente ${index + 1}`,
+    }))
+    .filter((faq) => faq.question || faq.answer);
+  const previewPaymentMethods = [
+    landing.paymentMethodOne,
+    landing.paymentMethodTwo,
+    landing.paymentMethodThree,
+  ]
+    .map((method) => method?.trim())
+    .filter(Boolean);
+  const effectivePaymentMethodLabel =
+    form.paymentMethodLabel?.trim() || sellerSettings.defaultPaymentMethodLabel || '';
+  const effectivePaymentAccountHolder =
+    form.paymentAccountHolder?.trim() || sellerSettings.defaultPaymentAccountHolder || '';
+  const effectivePaymentAccountType =
+    form.paymentAccountType?.trim() || sellerSettings.defaultPaymentAccountType || '';
+  const effectivePaymentAccountNumber =
+    form.paymentAccountNumber?.trim() || sellerSettings.defaultPaymentAccountNumber || '';
 
   if (isLoading) {
     return (
@@ -662,22 +809,8 @@ export const CampaignFormPage = ({
 
                 {activeMarketingTab === 'trust' ? (
                   <div className="marketing-tab-panel" role="tabpanel">
-                    <h3>Marca, compra y confianza</h3>
+                    <h3>Compra y confianza</h3>
                     <div className="form-grid">
-                      <label className="field">
-                        <span>Nombre de marca</span>
-                        <input
-                          value={landing.brandName ?? ''}
-                          onChange={(event) => updateLanding({ brandName: event.target.value })}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Subtítulo de marca</span>
-                        <input
-                          value={landing.brandSubtitle ?? ''}
-                          onChange={(event) => updateLanding({ brandSubtitle: event.target.value })}
-                        />
-                      </label>
                       <label className="field">
                         <span>Botón superior</span>
                         <input
@@ -908,7 +1041,7 @@ export const CampaignFormPage = ({
 
                 {activeMarketingTab === 'faq' ? (
                   <div className="marketing-tab-panel" role="tabpanel">
-                    <h3>Organizador y preguntas frecuentes</h3>
+                    <h3>Sorteo y preguntas frecuentes</h3>
                     <div className="form-grid">
                       <label className="field">
                         <span>Título organizador</span>
@@ -917,40 +1050,6 @@ export const CampaignFormPage = ({
                           onChange={(event) =>
                             updateLanding({ organizerTitle: event.target.value })
                           }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Empresa</span>
-                        <input
-                          value={landing.organizerCompany ?? ''}
-                          onChange={(event) =>
-                            updateLanding({ organizerCompany: event.target.value })
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>NIT / documento</span>
-                        <input
-                          value={landing.organizerTaxId ?? ''}
-                          onChange={(event) =>
-                            updateLanding({ organizerTaxId: event.target.value })
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Dirección</span>
-                        <input
-                          value={landing.organizerAddress ?? ''}
-                          onChange={(event) =>
-                            updateLanding({ organizerAddress: event.target.value })
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Ciudad</span>
-                        <input
-                          value={landing.organizerCity ?? ''}
-                          onChange={(event) => updateLanding({ organizerCity: event.target.value })}
                         />
                       </label>
                       <label className="field">
@@ -1019,7 +1118,7 @@ export const CampaignFormPage = ({
 
                 {activeMarketingTab === 'footer' ? (
                   <div className="marketing-tab-panel" role="tabpanel">
-                    <h3>Resultado y pie de página</h3>
+                    <h3>Resultado</h3>
                     <div className="form-grid">
                       <label className="field">
                         <span>Título resultados</span>
@@ -1037,95 +1136,151 @@ export const CampaignFormPage = ({
                           }
                         />
                       </label>
-                      <label className="field field-span-2">
-                        <span>Texto del footer</span>
-                        <textarea
-                          rows={2}
-                          value={landing.footerBrandText ?? ''}
-                          onChange={(event) =>
-                            updateLanding({ footerBrandText: event.target.value })
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Teléfono footer</span>
-                        <input
-                          value={landing.footerPhone ?? ''}
-                          onChange={(event) => updateLanding({ footerPhone: event.target.value })}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Email footer</span>
-                        <input
-                          value={landing.footerEmail ?? ''}
-                          onChange={(event) => updateLanding({ footerEmail: event.target.value })}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Horario footer</span>
-                        <input
-                          value={landing.footerHours ?? ''}
-                          onChange={(event) => updateLanding({ footerHours: event.target.value })}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Instagram URL</span>
-                        <input
-                          value={landing.instagramUrl ?? ''}
-                          onChange={(event) => updateLanding({ instagramUrl: event.target.value })}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Facebook URL</span>
-                        <input
-                          value={landing.facebookUrl ?? ''}
-                          onChange={(event) => updateLanding({ facebookUrl: event.target.value })}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>YouTube URL</span>
-                        <input
-                          value={landing.youtubeUrl ?? ''}
-                          onChange={(event) => updateLanding({ youtubeUrl: event.target.value })}
-                        />
-                      </label>
-                      <label className="field field-span-2">
-                        <span>Copyright</span>
-                        <input
-                          value={landing.copyrightText ?? ''}
-                          onChange={(event) => updateLanding({ copyrightText: event.target.value })}
-                        />
-                      </label>
                     </div>
                   </div>
                 ) : null}
               </section>
 
               <aside className="landing-preview-card" aria-label="Vista previa de la landing">
-                <p className="panel-eyebrow">Vista previa</p>
-                <div className="landing-preview-hero">
-                  {previewImage ? (
-                    <img
-                      src={previewImage}
-                      alt={previewPrizeLabel}
-                      className="landing-preview-image"
-                    />
-                  ) : (
-                    <div className="landing-preview-image landing-preview-image-empty">
-                      <span>{previewPrizeLabel}</span>
-                      <small>Sube una imagen en Portada para completar la vista.</small>
-                    </div>
-                  )}
+                <div className="landing-preview-head">
                   <div>
-                    <span className="badge badge-gold">{previewBadge}</span>
-                    <h3>
-                      {previewTitle}{' '}
-                      {previewAccent ? <span className="accent">{previewAccent}</span> : null}
-                    </h3>
-                    <p className="muted">{previewSubtitle}</p>
-                    <div className="landing-preview-actions" aria-hidden="true">
-                      <span>{previewCtaLabel}</span>
-                    </div>
+                    <p className="panel-eyebrow">Vista previa</p>
+                    <h3>Landing pública</h3>
+                  </div>
+                  <span>Scroll</span>
+                </div>
+
+                <div className="landing-preview-viewport" aria-label="Preview navegable de landing">
+                  <div className="landing-preview-page">
+                    <header className="preview-navbar">
+                      <div>
+                        <strong>{previewBrandName}</strong>
+                        <small>{previewBrandSubtitle}</small>
+                      </div>
+                      <span>{landing.navbarCtaLabel?.trim() || 'Comprar'}</span>
+                    </header>
+
+                    <section className="preview-section preview-hero-section">
+                      <div className="landing-preview-hero-copy">
+                        <span className="badge badge-gold">{previewBadge}</span>
+                        <h4>
+                          {previewTitle}{' '}
+                          {previewAccent ? <span className="accent">{previewAccent}</span> : null}
+                        </h4>
+                        <p>{previewSubtitle}</p>
+                      </div>
+
+                      {previewImage ? (
+                        <img
+                          src={previewImage}
+                          alt={previewPrizeLabel}
+                          className="landing-preview-image"
+                        />
+                      ) : (
+                        <div className="landing-preview-image landing-preview-image-empty">
+                          <span>{previewPrizeLabel}</span>
+                          <small>Sube una imagen en Portada para completar la vista.</small>
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="preview-section preview-purchase-card">
+                      <div>
+                        <span>{landing.priceLabel?.trim() || 'Valor por número'}</span>
+                        <strong>{previewPrice}</strong>
+                      </div>
+                      <button type="button" tabIndex={-1} aria-hidden="true">
+                        {previewCtaLabel}
+                      </button>
+                      {previewPaymentMethods.length > 0 ? (
+                        <p>{previewPaymentMethods.join(' · ')}</p>
+                      ) : null}
+                      {effectivePaymentMethodLabel ? <p>{effectivePaymentMethodLabel}</p> : null}
+                      {effectivePaymentAccountNumber ? (
+                        <p>
+                          {effectivePaymentAccountHolder} · {effectivePaymentAccountType}{' '}
+                          {effectivePaymentAccountNumber}
+                        </p>
+                      ) : null}
+                    </section>
+
+                    {previewTrustCards.length > 0 ? (
+                      <section className="preview-section preview-trust-grid">
+                        {previewTrustCards.map((title) => (
+                          <div key={title}>
+                            <span aria-hidden="true">✓</span>
+                            <strong>{title}</strong>
+                          </div>
+                        ))}
+                      </section>
+                    ) : null}
+
+                    <section className="preview-section">
+                      <p className="preview-kicker">Cómo funciona</p>
+                      <h4>{landing.howTitle?.trim() || 'Participar es muy fácil'}</h4>
+                      <p>
+                        {landing.howSubtitle?.trim() || 'Resume aquí el proceso para tus clientes.'}
+                      </p>
+                      <div className="preview-steps">
+                        {previewSteps.map((step) => (
+                          <article key={step.index}>
+                            <span>{step.index}</span>
+                            <div>
+                              <strong>{step.title}</strong>
+                              <p>{step.description}</p>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="preview-section">
+                      <p className="preview-kicker">Premio</p>
+                      <h4>{landing.prizeDetailsTitle?.trim() || 'Detalles del premio'}</h4>
+                      <p>
+                        {landing.prizeDetailsSubtitle?.trim() ||
+                          'Muestra aquí los datos clave del premio.'}
+                      </p>
+                      <div className="preview-detail-grid">
+                        {previewPrizeDetails.map((detail) => (
+                          <div key={detail.label}>
+                            <span>{detail.label}</span>
+                            <strong>{detail.value}</strong>
+                            {detail.sub ? <small>{detail.sub}</small> : null}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="preview-section">
+                      <p className="preview-kicker">Preguntas</p>
+                      <h4>{landing.faqTitle?.trim() || 'Preguntas frecuentes'}</h4>
+                      <div className="preview-faq-list">
+                        {previewFaqs.map((faq) => (
+                          <article key={faq.question}>
+                            <strong>{faq.question}</strong>
+                            <p>{faq.answer}</p>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="preview-section preview-result-section">
+                      <p className="preview-kicker">Resultado</p>
+                      <h4>{landing.resultsTitle?.trim() || 'Resultado del sorteo'}</h4>
+                      <p>
+                        {landing.resultsPendingText?.trim() ||
+                          'Cuando tengas ganador, aparecerá aquí.'}
+                      </p>
+                    </section>
+
+                    <footer className="preview-footer">
+                      <strong>{previewBrandName}</strong>
+                      <p>{landing.footerBrandText?.trim() || previewBrandSubtitle}</p>
+                      <small>
+                        {landing.copyrightText?.trim() || 'Todos los derechos reservados.'}
+                      </small>
+                    </footer>
                   </div>
                 </div>
               </aside>
@@ -1192,7 +1347,7 @@ export const CampaignFormPage = ({
             <div className="payments-layout">
               <ImageUploadField
                 label="Código QR de pago"
-                hint="Sube el QR de Nequi, Bancolombia u otra billetera. Lo verá el comprador al pagar."
+                hint="Opcional. Si lo dejas vacío, se usará el QR configurado en Configuración."
                 previewSrc={previewQr}
                 emptyLabel="Aún sin QR de pago"
                 previewAlt="Código QR de pago"
@@ -1202,7 +1357,10 @@ export const CampaignFormPage = ({
                 onInvalidFile={setError}
               />
 
-              <h3 className="payments-section-title">Datos de transferencia</h3>
+              <h3 className="payments-section-title">Datos de transferencia de esta campaña</h3>
+              <p className="muted">
+                Opcional. Déjalos vacíos para usar los datos globales guardados en Configuración.
+              </p>
               <div className="form-grid">
                 <label className="field">
                   <span>Método de pago</span>

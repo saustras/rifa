@@ -19,6 +19,7 @@ import {
   getLocalDatabaseHealth,
   getSellerActiveRaffle,
   getSellerDrawResult,
+  getSellerSettings,
   getSellerOrderDetail,
   getSellerRaffleById,
   listPublicRaffleNumbersBySlug,
@@ -37,6 +38,8 @@ import {
   releaseSellerRaffleNumber,
   upsertNotificationLog,
   updateSellerRaffle,
+  updateSellerDefaultPaymentQrImage,
+  updateSellerSettings,
   updateSellerRaffleCoverImage,
   updateSellerRafflePaymentQrImage,
   updateSellerRafflePrize,
@@ -51,6 +54,7 @@ import {
   rejectAdminOrderSchema,
   updateAdminRaffleSchema,
   updatePrizeSchema,
+  sellerSettingsSchema,
   uploadCampaignImageSchema,
   uploadPaymentProofSchema,
 } from '@rifa/validation';
@@ -154,9 +158,9 @@ const sendText = (
   response.writeHead(statusCode, {
     'content-type': contentType,
     'content-length': payload.byteLength,
-          'access-control-allow-origin': '*',
-          'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-          'access-control-allow-headers': 'authorization, content-type, x-api-key, x-seller-id',
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+    'access-control-allow-headers': 'authorization, content-type, x-api-key, x-seller-id',
   });
   response.end(payload);
 };
@@ -232,7 +236,9 @@ const signAdminToken = (payload: AdminTokenPayload): string => {
 
   const header = toBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const body = toBase64Url(JSON.stringify(payload));
-  const signature = toBase64Url(createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest());
+  const signature = toBase64Url(
+    createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest(),
+  );
 
   return `${header}.${body}.${signature}`;
 };
@@ -809,6 +815,91 @@ const handleAdminAuth = async (
         sellerId: context.sellerId,
       },
     });
+    return true;
+  }
+
+  sendJson(response, 404, { error: 'not_found', path: pathname });
+  return true;
+};
+
+const handleAdminSettings = async (
+  request: IncomingMessage,
+  response: ServerResponse,
+  pathname: string,
+): Promise<boolean> => {
+  if (!pathname.startsWith('/api/admin/settings')) {
+    return false;
+  }
+
+  const adminContext = authorizeAdmin(request);
+
+  if (isErrorResponse(adminContext)) {
+    sendJson(response, 401, adminContext);
+    return true;
+  }
+
+  if (pathname === '/api/admin/settings' && request.method === 'GET') {
+    const data = await getSellerSettings({ sellerId: adminContext.sellerId });
+    sendJson(response, 200, { data });
+    return true;
+  }
+
+  if (pathname === '/api/admin/settings' && request.method === 'PATCH') {
+    const parsed = sellerSettingsSchema.safeParse(await readJsonBody(request));
+
+    if (!parsed.success) {
+      sendJson(response, 400, toValidationErrorResponse(parsed.error));
+      return true;
+    }
+
+    const data = await updateSellerSettings({
+      sellerId: adminContext.sellerId,
+      settings: parsed.data,
+    });
+
+    if (!data) {
+      sendJson(response, 404, { error: 'not_found', path: pathname });
+      return true;
+    }
+
+    sendJson(response, 200, { data });
+    return true;
+  }
+
+  if (pathname === '/api/admin/settings/payment-qr' && request.method === 'POST') {
+    const parsed = uploadCampaignImageSchema.safeParse(await readJsonBody(request));
+
+    if (!parsed.success) {
+      sendJson(response, 400, toValidationErrorResponse(parsed.error));
+      return true;
+    }
+
+    try {
+      const inputImage = decodeBase64Image(parsed.data.dataBase64);
+      const compressed = await compressCampaignCover(inputImage, parsed.data.mimeType);
+      const paymentQrImageUrl = await persistCampaignPaymentQrImage(
+        adminContext.sellerId,
+        compressed.buffer,
+        compressed.mimeType,
+      );
+      const data = await updateSellerDefaultPaymentQrImage({
+        sellerId: adminContext.sellerId,
+        paymentQrImageUrl,
+      });
+
+      if (!data) {
+        sendJson(response, 404, { error: 'not_found', path: pathname });
+        return true;
+      }
+
+      sendJson(response, 200, { data: { paymentQrImageUrl, settings: data } });
+    } catch (error: unknown) {
+      sendJson(response, 400, {
+        error: 'invalid_payment_qr_image',
+        message: toSafeErrorMessage(error),
+      });
+    }
+
     return true;
   }
 
@@ -1711,7 +1802,7 @@ export const createRifaApiServer = () =>
         response.writeHead(204, {
           'access-control-allow-origin': '*',
           'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-    'access-control-allow-headers': 'authorization, content-type, x-api-key, x-seller-id',
+          'access-control-allow-headers': 'authorization, content-type, x-api-key, x-seller-id',
           'access-control-max-age': '86400',
         });
         response.end();
@@ -1734,6 +1825,10 @@ export const createRifaApiServer = () =>
       }
 
       if (await handleCampaignAssets(request, response, pathname)) {
+        return;
+      }
+
+      if (await handleAdminSettings(request, response, pathname)) {
         return;
       }
 

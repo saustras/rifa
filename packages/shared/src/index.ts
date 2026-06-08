@@ -1,5 +1,5 @@
-export type { RaffleLandingConfig } from './landing-config';
-export { DEFAULT_LANDING_CONFIG } from './landing-config';
+export type { RaffleLandingConfig, SellerSettings } from './landing-config';
+export { DEFAULT_LANDING_CONFIG, DEFAULT_SELLER_SETTINGS } from './landing-config';
 
 export const RAFFLE_STATUSES = {
   draft: 'draft',

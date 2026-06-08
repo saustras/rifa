@@ -130,6 +130,30 @@ const adminRaffleFieldsSchema = z.object({
   paymentInstructions: z.string().max(1000).optional(),
 });
 
+export const sellerSettingsSchema = z.object({
+  brandName: z.string().min(1).max(80).optional(),
+  brandSubtitle: z.string().max(80).optional(),
+  organizerCompany: z.string().max(160).optional(),
+  organizerTaxId: z.string().max(80).optional(),
+  organizerAddress: z.string().max(160).optional(),
+  organizerCity: z.string().max(120).optional(),
+  supportPhone: z.string().max(80).optional(),
+  supportEmail: z.string().email().max(160).optional(),
+  supportHours: z.string().max(120).optional(),
+  instagramUrl: z.string().max(300).optional(),
+  facebookUrl: z.string().max(300).optional(),
+  youtubeUrl: z.string().max(300).optional(),
+  footerBrandText: z.string().max(240).optional(),
+  copyrightText: z.string().max(200).optional(),
+  defaultPaymentMethodLabel: z.string().max(120).optional(),
+  defaultPaymentAccountHolder: z.string().max(160).optional(),
+  defaultPaymentAccountType: z.string().max(80).optional(),
+  defaultPaymentAccountNumber: z.string().max(120).optional(),
+  defaultPaymentDocumentNumber: z.string().max(120).optional(),
+  defaultPaymentInstructions: z.string().max(1000).optional(),
+  defaultPaymentQrImageUrl: localCampaignAssetPathSchema.optional().or(z.literal('')),
+});
+
 export const createAdminRaffleSchema = adminRaffleFieldsSchema.superRefine((value, context) => {
   if (value.numberMax < value.numberMin) {
     context.addIssue({
@@ -142,7 +166,7 @@ export const createAdminRaffleSchema = adminRaffleFieldsSchema.superRefine((valu
   if (value.numberMax - value.numberMin + 1 > 10_000) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'A raffle can create at most 10,000 numbers in the MVP',
+      message: 'A raffle can create at most 10,000 numbers',
       path: ['numberMax'],
     });
   }
@@ -161,6 +185,7 @@ export const updateAdminRaffleSchema = adminRaffleFieldsSchema
 
 export type CreateAdminRaffleInput = z.infer<typeof createAdminRaffleSchema>;
 export type UpdateAdminRaffleInput = z.infer<typeof updateAdminRaffleSchema>;
+export type SellerSettingsInput = z.infer<typeof sellerSettingsSchema>;
 
 export const createPublicOrderSchema = z
   .object({

@@ -10,6 +10,7 @@ import type {
   DrawResult,
   OrderDetail,
   OrderListRow,
+  SellerSettings,
   UpdateRaffleInput,
 } from './types';
 
@@ -161,6 +162,28 @@ export const fetchDbHealth = async (): Promise<{
     sellersCount?: number;
     error?: string;
   };
+};
+
+export const fetchSellerSettings = async (
+  credentials: AdminCredentials,
+): Promise<SellerSettings> => {
+  const response = await requestAdminJson<{ readonly data: SellerSettings }>(
+    '/api/admin/settings',
+    credentials,
+  );
+  return response.data;
+};
+
+export const updateSellerSettings = async (
+  credentials: AdminCredentials,
+  payload: SellerSettings,
+): Promise<SellerSettings> => {
+  const response = await requestAdminJson<{ readonly data: SellerSettings }>(
+    '/api/admin/settings',
+    credentials,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+  );
+  return response.data;
 };
 
 export const fetchOrders = async (
@@ -336,6 +359,32 @@ export const uploadRafflePaymentQr = async (
       mimeType,
       dataBase64,
     }),
+  });
+
+  return response.data.paymentQrImageUrl;
+};
+
+export const uploadDefaultPaymentQr = async (
+  credentials: AdminCredentials,
+  file: File,
+): Promise<string> => {
+  const dataBase64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
+    reader.readAsDataURL(file);
+  });
+
+  const mimeType = file.type;
+  if (mimeType !== 'image/jpeg' && mimeType !== 'image/png' && mimeType !== 'image/webp') {
+    throw new Error('Formato no soportado. Usa JPG, PNG o WebP.');
+  }
+
+  const response = await requestAdminJson<{
+    readonly data: { readonly paymentQrImageUrl: string; readonly settings: SellerSettings };
+  }>('/api/admin/settings/payment-qr', credentials, {
+    method: 'POST',
+    body: JSON.stringify({ fileName: file.name, mimeType, dataBase64 }),
   });
 
   return response.data.paymentQrImageUrl;

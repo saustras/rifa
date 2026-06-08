@@ -64,6 +64,30 @@ export interface RaffleLandingConfig {
   readonly copyrightText?: string | undefined;
 }
 
+export interface SellerSettings {
+  readonly brandName?: string | undefined;
+  readonly brandSubtitle?: string | undefined;
+  readonly organizerCompany?: string | undefined;
+  readonly organizerTaxId?: string | undefined;
+  readonly organizerAddress?: string | undefined;
+  readonly organizerCity?: string | undefined;
+  readonly supportPhone?: string | undefined;
+  readonly supportEmail?: string | undefined;
+  readonly supportHours?: string | undefined;
+  readonly instagramUrl?: string | undefined;
+  readonly facebookUrl?: string | undefined;
+  readonly youtubeUrl?: string | undefined;
+  readonly footerBrandText?: string | undefined;
+  readonly copyrightText?: string | undefined;
+  readonly defaultPaymentMethodLabel?: string | undefined;
+  readonly defaultPaymentAccountHolder?: string | undefined;
+  readonly defaultPaymentAccountType?: string | undefined;
+  readonly defaultPaymentAccountNumber?: string | undefined;
+  readonly defaultPaymentDocumentNumber?: string | undefined;
+  readonly defaultPaymentInstructions?: string | undefined;
+  readonly defaultPaymentQrImageUrl?: string | undefined;
+}
+
 export const DEFAULT_LANDING_CONFIG: RaffleLandingConfig = {
   heroBadge: 'CAMPAÑA PROMOCIONAL',
   heroTitle: 'Gana este increíble',
@@ -131,4 +155,28 @@ export const DEFAULT_LANDING_CONFIG: RaffleLandingConfig = {
   facebookUrl: '',
   youtubeUrl: '',
   copyrightText: 'Todos los derechos reservados.',
+};
+
+export const DEFAULT_SELLER_SETTINGS: SellerSettings = {
+  brandName: 'ORYUM',
+  brandSubtitle: 'Campaigns',
+  organizerCompany: 'Empresa organizadora',
+  organizerTaxId: 'NIT por definir',
+  organizerAddress: 'Dirección por definir',
+  organizerCity: 'Ciudad por definir',
+  supportPhone: 'Teléfono por definir',
+  supportEmail: 'correo@dominio.com',
+  supportHours: 'Horario por definir',
+  instagramUrl: '',
+  facebookUrl: '',
+  youtubeUrl: '',
+  footerBrandText: 'Campañas promocionales transparentes, seguras y con resultados verificados.',
+  copyrightText: 'Todos los derechos reservados.',
+  defaultPaymentMethodLabel: 'Nequi / Transferencia',
+  defaultPaymentAccountHolder: '',
+  defaultPaymentAccountType: '',
+  defaultPaymentAccountNumber: '',
+  defaultPaymentDocumentNumber: '',
+  defaultPaymentInstructions: '',
+  defaultPaymentQrImageUrl: '',
 };

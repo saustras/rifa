@@ -11,6 +11,7 @@ import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 
 import { createLocalPgliteDatabase } from './client';
 import { auditLogs, customers, orderNumbers, orders, raffleNumbers, raffles } from './schema';
+import { getSellerSettings } from './seller-settings';
 
 interface SellerScopeInput {
   readonly sellerId: string;
@@ -111,6 +112,51 @@ interface PublicOrderResult {
 
 const toMoneyString = (value: number): string => value.toFixed(2);
 
+const emptyToUndefined = (value: string | null | undefined): string | undefined =>
+  value?.trim() ? value : undefined;
+
+const applySellerDefaultsToRaffle = async (raffle: RaffleRow): Promise<RaffleRow> => {
+  const settings = await getSellerSettings({ sellerId: raffle.sellerId });
+  const landingConfig = raffle.landingConfig ?? {};
+
+  return {
+    ...raffle,
+    paymentQrImageUrl:
+      raffle.paymentQrImageUrl ?? emptyToUndefined(settings.defaultPaymentQrImageUrl) ?? null,
+    paymentMethodLabel:
+      raffle.paymentMethodLabel ?? emptyToUndefined(settings.defaultPaymentMethodLabel) ?? null,
+    paymentAccountHolder:
+      raffle.paymentAccountHolder ?? emptyToUndefined(settings.defaultPaymentAccountHolder) ?? null,
+    paymentAccountType:
+      raffle.paymentAccountType ?? emptyToUndefined(settings.defaultPaymentAccountType) ?? null,
+    paymentAccountNumber:
+      raffle.paymentAccountNumber ?? emptyToUndefined(settings.defaultPaymentAccountNumber) ?? null,
+    paymentDocumentNumber:
+      raffle.paymentDocumentNumber ??
+      emptyToUndefined(settings.defaultPaymentDocumentNumber) ??
+      null,
+    paymentInstructions:
+      raffle.paymentInstructions ?? emptyToUndefined(settings.defaultPaymentInstructions) ?? null,
+    landingConfig: {
+      ...landingConfig,
+      brandName: landingConfig.brandName ?? settings.brandName,
+      brandSubtitle: landingConfig.brandSubtitle ?? settings.brandSubtitle,
+      organizerCompany: landingConfig.organizerCompany ?? settings.organizerCompany,
+      organizerTaxId: landingConfig.organizerTaxId ?? settings.organizerTaxId,
+      organizerAddress: landingConfig.organizerAddress ?? settings.organizerAddress,
+      organizerCity: landingConfig.organizerCity ?? settings.organizerCity,
+      footerPhone: landingConfig.footerPhone ?? settings.supportPhone,
+      footerEmail: landingConfig.footerEmail ?? settings.supportEmail,
+      footerHours: landingConfig.footerHours ?? settings.supportHours,
+      instagramUrl: landingConfig.instagramUrl ?? settings.instagramUrl,
+      facebookUrl: landingConfig.facebookUrl ?? settings.facebookUrl,
+      youtubeUrl: landingConfig.youtubeUrl ?? settings.youtubeUrl,
+      footerBrandText: landingConfig.footerBrandText ?? settings.footerBrandText,
+      copyrightText: landingConfig.copyrightText ?? settings.copyrightText,
+    },
+  };
+};
+
 const toNullableDate = (value: string | undefined): Date | null => {
   if (!value) {
     return null;
@@ -163,7 +209,7 @@ export const getSellerRaffleById = async ({
       .where(and(eq(raffles.sellerId, sellerId), eq(raffles.id, raffleId)))
       .limit(1);
 
-    return raffle ?? null;
+    return raffle ? applySellerDefaultsToRaffle(raffle) : null;
   } finally {
     await client.close();
   }
@@ -342,7 +388,7 @@ export const getSellerActiveRaffle = async ({
       .orderBy(desc(raffles.updatedAt))
       .limit(1);
 
-    return raffle ?? null;
+    return raffle ? applySellerDefaultsToRaffle(raffle) : null;
   } finally {
     await client.close();
   }
@@ -358,7 +404,7 @@ export const getPublicActiveRaffleBySlug = async (slug: string): Promise<RaffleR
       .where(and(eq(raffles.slug, slug), eq(raffles.status, 'active')))
       .limit(1);
 
-    return raffle ?? null;
+    return raffle ? applySellerDefaultsToRaffle(raffle) : null;
   } finally {
     await client.close();
   }

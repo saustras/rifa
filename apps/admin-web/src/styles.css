@@ -977,6 +977,70 @@ button:disabled {
   padding: 0 0.25rem;
 }
 
+.marketing-fields {
+  min-width: 0;
+}
+
+.marketing-fields-head {
+  margin-bottom: 0.85rem;
+}
+
+.marketing-fields-head h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.marketing-fields-head p {
+  margin: 0;
+}
+
+.marketing-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.marketing-subtab {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.45rem 0.7rem;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.marketing-subtab:hover {
+  color: var(--navy-700);
+  background: #eef4ff;
+}
+
+.marketing-subtab:focus-visible {
+  outline: 2px solid var(--gold-500, #f4b21b);
+  outline-offset: 2px;
+}
+
+.marketing-subtab.is-active {
+  background: var(--navy-700);
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+}
+
+.marketing-tab-panel {
+  display: grid;
+  gap: 0.9rem;
+}
+
 .marketing-fields h3,
 .draw-section h3 {
   margin: 0 0 0.65rem;
@@ -1122,6 +1186,9 @@ button:disabled {
   border-radius: 14px;
   padding: 0.85rem;
   background: linear-gradient(180deg, #f8fafc, #ffffff);
+  align-self: start;
+  position: sticky;
+  top: 1rem;
 }
 
 .landing-preview-hero {
@@ -1138,13 +1205,44 @@ button:disabled {
 }
 
 .landing-preview-image-empty {
+  display: grid;
+  place-items: center;
+  gap: 0.25rem;
   min-height: 140px;
+  padding: 1rem;
+  text-align: center;
+  border: 1px dashed #cbd5e1;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(244, 178, 27, 0.18), transparent 32%),
+    linear-gradient(135deg, #f8fafc, #eef4ff);
+  color: var(--navy-700);
+}
+
+.landing-preview-image-empty span {
+  font-weight: 800;
+}
+
+.landing-preview-image-empty small {
+  max-width: 22ch;
+  color: var(--text-muted);
+  font-size: 0.78rem;
 }
 
 .landing-preview-card h3 {
   margin: 0.35rem 0;
   font-size: 1.15rem;
   line-height: 1.2;
+}
+
+.landing-preview-actions {
+  display: inline-flex;
+  margin-top: 0.75rem;
+  border-radius: 999px;
+  background: var(--navy-700);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0.5rem 0.8rem;
 }
 
 .campaign-form-actions {
@@ -1388,6 +1486,10 @@ button:disabled {
   .marketing-layout,
   .payment-assets-grid {
     grid-template-columns: 1fr;
+  }
+
+  .landing-preview-card {
+    position: static;
   }
 
   .cover-upload,

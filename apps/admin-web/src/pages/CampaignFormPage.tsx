@@ -26,6 +26,7 @@ import type {
 } from '../types';
 
 type FormTab = 'general' | 'marketing' | 'numbers' | 'payments' | 'draw';
+type MarketingTab = 'cover' | 'hero' | 'trust' | 'steps' | 'faq' | 'footer';
 
 interface CampaignFormPageProps {
   readonly credentials: AdminCredentials;
@@ -74,6 +75,15 @@ const TAB_LABELS: Record<FormTab, string> = {
   draw: 'Sorteo',
 };
 
+const MARKETING_TAB_LABELS: Record<MarketingTab, string> = {
+  cover: 'Portada',
+  hero: 'Texto principal',
+  trust: 'Compra y confianza',
+  steps: 'Cómo funciona',
+  faq: 'Preguntas',
+  footer: 'Resultado y pie',
+};
+
 export const CampaignFormPage = ({
   credentials,
   raffleId,
@@ -91,6 +101,7 @@ export const CampaignFormPage = ({
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [isUploadingQr, setIsUploadingQr] = useState(false);
   const [activeTab, setActiveTab] = useState<FormTab>('general');
+  const [activeMarketingTab, setActiveMarketingTab] = useState<MarketingTab>('cover');
   const [isLoading, setIsLoading] = useState(Boolean(raffleId));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
@@ -403,6 +414,14 @@ export const CampaignFormPage = ({
     : paymentQrImageUrl
       ? 'QR de pago guardado en la campaña.'
       : undefined;
+  const previewBadge = landing.heroBadge?.trim() || 'Vista previa de portada';
+  const previewTitle = landing.heroTitle?.trim() || form.title.trim() || 'Título de tu campaña';
+  const previewAccent = landing.heroAccent?.trim();
+  const previewSubtitle =
+    landing.heroSubtitle?.trim() ||
+    'Agrega el texto principal para ver cómo se sentirá la landing para tus compradores.';
+  const previewPrizeLabel = landing.prizeLabel?.trim() || 'Foto del premio';
+  const previewCtaLabel = landing.submitButtonLabel?.trim() || 'Comprar participación';
 
   if (isLoading) {
     return (
@@ -552,463 +571,561 @@ export const CampaignFormPage = ({
           {activeTab === 'marketing' ? (
             <div className="marketing-layout">
               <section className="marketing-fields">
-                <h3>Textos del hero (landing)</h3>
-                <div className="form-grid">
-                  <label className="field">
-                    <span>Etiqueta superior</span>
-                    <input
-                      value={landing.heroBadge ?? ''}
-                      onChange={(event) => updateLanding({ heroBadge: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Texto del premio (accesibilidad)</span>
-                    <input
-                      value={landing.prizeLabel ?? ''}
-                      onChange={(event) => updateLanding({ prizeLabel: event.target.value })}
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>Título — parte 1</span>
-                    <input
-                      value={landing.heroTitle ?? ''}
-                      onChange={(event) => updateLanding({ heroTitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Título — palabra destacada</span>
-                    <input
-                      value={landing.heroAccent ?? ''}
-                      onChange={(event) => updateLanding({ heroAccent: event.target.value })}
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>Subtítulo</span>
-                    <textarea
-                      rows={3}
-                      value={landing.heroSubtitle ?? ''}
-                      onChange={(event) => updateLanding({ heroSubtitle: event.target.value })}
-                    />
-                  </label>
+                <div className="marketing-fields-head">
+                  <h3>Publicidad de la landing</h3>
+                  <p className="muted">
+                    Divide la información en secciones cortas para editar más rápido y ver el
+                    resultado al lado.
+                  </p>
                 </div>
 
-                <ImageUploadField
-                  label="Foto del premio"
-                  hint="Aparece grande en el hero de la landing pública."
-                  previewSrc={previewImage}
-                  emptyLabel="Aún sin foto del premio"
-                  previewAlt={landing.prizeLabel ?? 'Foto del premio'}
-                  statusNote={coverStatusNote}
-                  isUploading={isUploadingCover}
-                  onFileSelect={(file) => void handleCoverSelect(file)}
-                  onInvalidFile={setError}
-                />
-
-                <h3>Marca, compra y confianza</h3>
-                <div className="form-grid">
-                  <label className="field">
-                    <span>Nombre de marca</span>
-                    <input
-                      value={landing.brandName ?? ''}
-                      onChange={(event) => updateLanding({ brandName: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Subtítulo de marca</span>
-                    <input
-                      value={landing.brandSubtitle ?? ''}
-                      onChange={(event) => updateLanding({ brandSubtitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Botón superior</span>
-                    <input
-                      value={landing.navbarCtaLabel ?? ''}
-                      onChange={(event) => updateLanding({ navbarCtaLabel: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Título de compra</span>
-                    <input
-                      value={landing.purchaseTitle ?? ''}
-                      onChange={(event) => updateLanding({ purchaseTitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Etiqueta de precio</span>
-                    <input
-                      value={landing.priceLabel ?? ''}
-                      onChange={(event) => updateLanding({ priceLabel: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Botón de pago</span>
-                    <input
-                      value={landing.submitButtonLabel ?? ''}
-                      onChange={(event) => updateLanding({ submitButtonLabel: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Confianza 1</span>
-                    <input
-                      value={landing.trustCardOneTitle ?? ''}
-                      onChange={(event) => updateLanding({ trustCardOneTitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Confianza 2</span>
-                    <input
-                      value={landing.trustCardTwoTitle ?? ''}
-                      onChange={(event) => updateLanding({ trustCardTwoTitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Etiqueta medios de pago</span>
-                    <input
-                      value={landing.paymentMethodsLabel ?? ''}
-                      onChange={(event) =>
-                        updateLanding({ paymentMethodsLabel: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Método visible 1</span>
-                    <input
-                      value={landing.paymentMethodOne ?? ''}
-                      onChange={(event) => updateLanding({ paymentMethodOne: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Método visible 2</span>
-                    <input
-                      value={landing.paymentMethodTwo ?? ''}
-                      onChange={(event) => updateLanding({ paymentMethodTwo: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Método visible 3</span>
-                    <input
-                      value={landing.paymentMethodThree ?? ''}
-                      onChange={(event) =>
-                        updateLanding({ paymentMethodThree: event.target.value })
-                      }
-                    />
-                  </label>
+                <div
+                  className="marketing-subtabs"
+                  role="tablist"
+                  aria-label="Publicidad de la landing"
+                >
+                  {(Object.keys(MARKETING_TAB_LABELS) as MarketingTab[]).map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      role="tab"
+                      aria-selected={activeMarketingTab === tab}
+                      className={`marketing-subtab${activeMarketingTab === tab ? ' is-active' : ''}`}
+                      onClick={() => setActiveMarketingTab(tab)}
+                    >
+                      {MARKETING_TAB_LABELS[tab]}
+                    </button>
+                  ))}
                 </div>
 
-                <h3>Cómo funciona</h3>
-                <div className="form-grid">
-                  <label className="field">
-                    <span>Título de sección</span>
-                    <input
-                      value={landing.howTitle ?? ''}
-                      onChange={(event) => updateLanding({ howTitle: event.target.value })}
+                {activeMarketingTab === 'cover' ? (
+                  <div className="marketing-tab-panel" role="tabpanel">
+                    <ImageUploadField
+                      label="Foto del premio"
+                      hint="Aparece grande en la portada de la landing pública."
+                      previewSrc={previewImage}
+                      emptyLabel="Aún sin foto del premio"
+                      previewAlt={landing.prizeLabel ?? 'Foto del premio'}
+                      statusNote={coverStatusNote}
+                      isUploading={isUploadingCover}
+                      onFileSelect={(file) => void handleCoverSelect(file)}
+                      onInvalidFile={setError}
                     />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>Subtítulo</span>
-                    <input
-                      value={landing.howSubtitle ?? ''}
-                      onChange={(event) => updateLanding({ howSubtitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Paso 1 — título</span>
-                    <input
-                      value={landing.stepOneTitle ?? ''}
-                      onChange={(event) => updateLanding({ stepOneTitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>Paso 1 — descripción</span>
-                    <input
-                      value={landing.stepOneDescription ?? ''}
-                      onChange={(event) =>
-                        updateLanding({ stepOneDescription: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Paso 2 — título</span>
-                    <input
-                      value={landing.stepTwoTitle ?? ''}
-                      onChange={(event) => updateLanding({ stepTwoTitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>Paso 2 — descripción</span>
-                    <input
-                      value={landing.stepTwoDescription ?? ''}
-                      onChange={(event) =>
-                        updateLanding({ stepTwoDescription: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Paso 3 — título</span>
-                    <input
-                      value={landing.stepThreeTitle ?? ''}
-                      onChange={(event) => updateLanding({ stepThreeTitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>Paso 3 — descripción</span>
-                    <input
-                      value={landing.stepThreeDescription ?? ''}
-                      onChange={(event) =>
-                        updateLanding({ stepThreeDescription: event.target.value })
-                      }
-                    />
-                  </label>
-                </div>
-
-                <h3>Detalles del premio</h3>
-                <div className="form-grid">
-                  <label className="field">
-                    <span>Título de sección</span>
-                    <input
-                      value={landing.prizeDetailsTitle ?? ''}
-                      onChange={(event) => updateLanding({ prizeDetailsTitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>Subtítulo de sección</span>
-                    <input
-                      value={landing.prizeDetailsSubtitle ?? ''}
-                      onChange={(event) =>
-                        updateLanding({ prizeDetailsSubtitle: event.target.value })
-                      }
-                    />
-                  </label>
-                  {[
-                    ['prizeDetailOne', 'Detalle 1'],
-                    ['prizeDetailTwo', 'Detalle 2'],
-                    ['prizeDetailThree', 'Detalle 3'],
-                  ].map(([prefix, label]) => (
-                    <div key={prefix} className="form-grid field-span-2">
-                      <label className="field">
-                        <span>{label} — etiqueta</span>
+                    <div className="form-grid">
+                      <label className="field field-span-2">
+                        <span>Texto alternativo del premio</span>
                         <input
-                          value={landing[`${prefix}Label` as keyof RaffleLandingConfig] ?? ''}
-                          onChange={(event) =>
-                            updateLandingField(
-                              `${prefix}Label` as keyof RaffleLandingConfig,
-                              event.target.value,
-                            )
-                          }
+                          value={landing.prizeLabel ?? ''}
+                          onChange={(event) => updateLanding({ prizeLabel: event.target.value })}
                         />
                       </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeMarketingTab === 'hero' ? (
+                  <div className="marketing-tab-panel" role="tabpanel">
+                    <h3>Texto principal</h3>
+                    <div className="form-grid">
                       <label className="field">
-                        <span>{label} — valor</span>
+                        <span>Etiqueta superior</span>
                         <input
-                          value={landing[`${prefix}Value` as keyof RaffleLandingConfig] ?? ''}
-                          onChange={(event) =>
-                            updateLandingField(
-                              `${prefix}Value` as keyof RaffleLandingConfig,
-                              event.target.value,
-                            )
-                          }
+                          value={landing.heroBadge ?? ''}
+                          onChange={(event) => updateLanding({ heroBadge: event.target.value })}
                         />
                       </label>
                       <label className="field field-span-2">
-                        <span>{label} — texto menor</span>
+                        <span>Título — parte 1</span>
                         <input
-                          value={landing[`${prefix}Sub` as keyof RaffleLandingConfig] ?? ''}
+                          value={landing.heroTitle ?? ''}
+                          onChange={(event) => updateLanding({ heroTitle: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Título — palabra destacada</span>
+                        <input
+                          value={landing.heroAccent ?? ''}
+                          onChange={(event) => updateLanding({ heroAccent: event.target.value })}
+                        />
+                      </label>
+                      <label className="field field-span-2">
+                        <span>Subtítulo</span>
+                        <textarea
+                          rows={3}
+                          value={landing.heroSubtitle ?? ''}
+                          onChange={(event) => updateLanding({ heroSubtitle: event.target.value })}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeMarketingTab === 'trust' ? (
+                  <div className="marketing-tab-panel" role="tabpanel">
+                    <h3>Marca, compra y confianza</h3>
+                    <div className="form-grid">
+                      <label className="field">
+                        <span>Nombre de marca</span>
+                        <input
+                          value={landing.brandName ?? ''}
+                          onChange={(event) => updateLanding({ brandName: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Subtítulo de marca</span>
+                        <input
+                          value={landing.brandSubtitle ?? ''}
+                          onChange={(event) => updateLanding({ brandSubtitle: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Botón superior</span>
+                        <input
+                          value={landing.navbarCtaLabel ?? ''}
                           onChange={(event) =>
-                            updateLandingField(
-                              `${prefix}Sub` as keyof RaffleLandingConfig,
-                              event.target.value,
-                            )
+                            updateLanding({ navbarCtaLabel: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Título de compra</span>
+                        <input
+                          value={landing.purchaseTitle ?? ''}
+                          onChange={(event) => updateLanding({ purchaseTitle: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Etiqueta de precio</span>
+                        <input
+                          value={landing.priceLabel ?? ''}
+                          onChange={(event) => updateLanding({ priceLabel: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Botón de pago</span>
+                        <input
+                          value={landing.submitButtonLabel ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ submitButtonLabel: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Confianza 1</span>
+                        <input
+                          value={landing.trustCardOneTitle ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ trustCardOneTitle: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Confianza 2</span>
+                        <input
+                          value={landing.trustCardTwoTitle ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ trustCardTwoTitle: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Etiqueta medios de pago</span>
+                        <input
+                          value={landing.paymentMethodsLabel ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ paymentMethodsLabel: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Método visible 1</span>
+                        <input
+                          value={landing.paymentMethodOne ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ paymentMethodOne: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Método visible 2</span>
+                        <input
+                          value={landing.paymentMethodTwo ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ paymentMethodTwo: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Método visible 3</span>
+                        <input
+                          value={landing.paymentMethodThree ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ paymentMethodThree: event.target.value })
                           }
                         />
                       </label>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ) : null}
 
-                <h3>Organizador, FAQ y pie de página</h3>
-                <div className="form-grid">
-                  <label className="field">
-                    <span>Título organizador</span>
-                    <input
-                      value={landing.organizerTitle ?? ''}
-                      onChange={(event) => updateLanding({ organizerTitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Empresa</span>
-                    <input
-                      value={landing.organizerCompany ?? ''}
-                      onChange={(event) => updateLanding({ organizerCompany: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>NIT / documento</span>
-                    <input
-                      value={landing.organizerTaxId ?? ''}
-                      onChange={(event) => updateLanding({ organizerTaxId: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Dirección</span>
-                    <input
-                      value={landing.organizerAddress ?? ''}
-                      onChange={(event) => updateLanding({ organizerAddress: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Ciudad</span>
-                    <input
-                      value={landing.organizerCity ?? ''}
-                      onChange={(event) => updateLanding({ organizerCity: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Título método sorteo</span>
-                    <input
-                      value={landing.drawMethodTitle ?? ''}
-                      onChange={(event) => updateLanding({ drawMethodTitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>Resumen sorteo fallback</span>
-                    <input
-                      value={landing.drawMethodFallbackSummary ?? ''}
-                      onChange={(event) =>
-                        updateLanding({ drawMethodFallbackSummary: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Título FAQ</span>
-                    <input
-                      value={landing.faqTitle ?? ''}
-                      onChange={(event) => updateLanding({ faqTitle: event.target.value })}
-                    />
-                  </label>
-                  {[
-                    ['faqOne', 'FAQ 1'],
-                    ['faqTwo', 'FAQ 2'],
-                    ['faqThree', 'FAQ 3'],
-                  ].map(([prefix, label]) => (
-                    <div key={prefix} className="form-grid field-span-2">
+                {activeMarketingTab === 'steps' ? (
+                  <div className="marketing-tab-panel" role="tabpanel">
+                    <h3>Cómo funciona</h3>
+                    <div className="form-grid">
                       <label className="field">
-                        <span>{label} — pregunta</span>
+                        <span>Título de sección</span>
                         <input
-                          value={landing[`${prefix}Question` as keyof RaffleLandingConfig] ?? ''}
+                          value={landing.howTitle ?? ''}
+                          onChange={(event) => updateLanding({ howTitle: event.target.value })}
+                        />
+                      </label>
+                      <label className="field field-span-2">
+                        <span>Subtítulo</span>
+                        <input
+                          value={landing.howSubtitle ?? ''}
+                          onChange={(event) => updateLanding({ howSubtitle: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Paso 1 — título</span>
+                        <input
+                          value={landing.stepOneTitle ?? ''}
+                          onChange={(event) => updateLanding({ stepOneTitle: event.target.value })}
+                        />
+                      </label>
+                      <label className="field field-span-2">
+                        <span>Paso 1 — descripción</span>
+                        <input
+                          value={landing.stepOneDescription ?? ''}
                           onChange={(event) =>
-                            updateLandingField(
-                              `${prefix}Question` as keyof RaffleLandingConfig,
-                              event.target.value,
-                            )
+                            updateLanding({ stepOneDescription: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Paso 2 — título</span>
+                        <input
+                          value={landing.stepTwoTitle ?? ''}
+                          onChange={(event) => updateLanding({ stepTwoTitle: event.target.value })}
+                        />
+                      </label>
+                      <label className="field field-span-2">
+                        <span>Paso 2 — descripción</span>
+                        <input
+                          value={landing.stepTwoDescription ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ stepTwoDescription: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Paso 3 — título</span>
+                        <input
+                          value={landing.stepThreeTitle ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ stepThreeTitle: event.target.value })
                           }
                         />
                       </label>
                       <label className="field field-span-2">
-                        <span>{label} — respuesta</span>
+                        <span>Paso 3 — descripción</span>
+                        <input
+                          value={landing.stepThreeDescription ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ stepThreeDescription: event.target.value })
+                          }
+                        />
+                      </label>
+                    </div>
+
+                    <h3>Detalles del premio</h3>
+                    <div className="form-grid">
+                      <label className="field">
+                        <span>Título de sección</span>
+                        <input
+                          value={landing.prizeDetailsTitle ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ prizeDetailsTitle: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field field-span-2">
+                        <span>Subtítulo de sección</span>
+                        <input
+                          value={landing.prizeDetailsSubtitle ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ prizeDetailsSubtitle: event.target.value })
+                          }
+                        />
+                      </label>
+                      {[
+                        ['prizeDetailOne', 'Detalle 1'],
+                        ['prizeDetailTwo', 'Detalle 2'],
+                        ['prizeDetailThree', 'Detalle 3'],
+                      ].map(([prefix, label]) => (
+                        <div key={prefix} className="form-grid field-span-2">
+                          <label className="field">
+                            <span>{label} — etiqueta</span>
+                            <input
+                              value={landing[`${prefix}Label` as keyof RaffleLandingConfig] ?? ''}
+                              onChange={(event) =>
+                                updateLandingField(
+                                  `${prefix}Label` as keyof RaffleLandingConfig,
+                                  event.target.value,
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            <span>{label} — valor</span>
+                            <input
+                              value={landing[`${prefix}Value` as keyof RaffleLandingConfig] ?? ''}
+                              onChange={(event) =>
+                                updateLandingField(
+                                  `${prefix}Value` as keyof RaffleLandingConfig,
+                                  event.target.value,
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="field field-span-2">
+                            <span>{label} — texto menor</span>
+                            <input
+                              value={landing[`${prefix}Sub` as keyof RaffleLandingConfig] ?? ''}
+                              onChange={(event) =>
+                                updateLandingField(
+                                  `${prefix}Sub` as keyof RaffleLandingConfig,
+                                  event.target.value,
+                                )
+                              }
+                            />
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeMarketingTab === 'faq' ? (
+                  <div className="marketing-tab-panel" role="tabpanel">
+                    <h3>Organizador y preguntas frecuentes</h3>
+                    <div className="form-grid">
+                      <label className="field">
+                        <span>Título organizador</span>
+                        <input
+                          value={landing.organizerTitle ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ organizerTitle: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Empresa</span>
+                        <input
+                          value={landing.organizerCompany ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ organizerCompany: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>NIT / documento</span>
+                        <input
+                          value={landing.organizerTaxId ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ organizerTaxId: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Dirección</span>
+                        <input
+                          value={landing.organizerAddress ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ organizerAddress: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Ciudad</span>
+                        <input
+                          value={landing.organizerCity ?? ''}
+                          onChange={(event) => updateLanding({ organizerCity: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Título método sorteo</span>
+                        <input
+                          value={landing.drawMethodTitle ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ drawMethodTitle: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field field-span-2">
+                        <span>Resumen sorteo fallback</span>
+                        <input
+                          value={landing.drawMethodFallbackSummary ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ drawMethodFallbackSummary: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Título FAQ</span>
+                        <input
+                          value={landing.faqTitle ?? ''}
+                          onChange={(event) => updateLanding({ faqTitle: event.target.value })}
+                        />
+                      </label>
+                      {[
+                        ['faqOne', 'FAQ 1'],
+                        ['faqTwo', 'FAQ 2'],
+                        ['faqThree', 'FAQ 3'],
+                      ].map(([prefix, label]) => (
+                        <div key={prefix} className="form-grid field-span-2">
+                          <label className="field">
+                            <span>{label} — pregunta</span>
+                            <input
+                              value={
+                                landing[`${prefix}Question` as keyof RaffleLandingConfig] ?? ''
+                              }
+                              onChange={(event) =>
+                                updateLandingField(
+                                  `${prefix}Question` as keyof RaffleLandingConfig,
+                                  event.target.value,
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="field field-span-2">
+                            <span>{label} — respuesta</span>
+                            <textarea
+                              rows={2}
+                              value={landing[`${prefix}Answer` as keyof RaffleLandingConfig] ?? ''}
+                              onChange={(event) =>
+                                updateLandingField(
+                                  `${prefix}Answer` as keyof RaffleLandingConfig,
+                                  event.target.value,
+                                )
+                              }
+                            />
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeMarketingTab === 'footer' ? (
+                  <div className="marketing-tab-panel" role="tabpanel">
+                    <h3>Resultado y pie de página</h3>
+                    <div className="form-grid">
+                      <label className="field">
+                        <span>Título resultados</span>
+                        <input
+                          value={landing.resultsTitle ?? ''}
+                          onChange={(event) => updateLanding({ resultsTitle: event.target.value })}
+                        />
+                      </label>
+                      <label className="field field-span-2">
+                        <span>Texto resultado pendiente</span>
+                        <input
+                          value={landing.resultsPendingText ?? ''}
+                          onChange={(event) =>
+                            updateLanding({ resultsPendingText: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field field-span-2">
+                        <span>Texto del footer</span>
                         <textarea
                           rows={2}
-                          value={landing[`${prefix}Answer` as keyof RaffleLandingConfig] ?? ''}
+                          value={landing.footerBrandText ?? ''}
                           onChange={(event) =>
-                            updateLandingField(
-                              `${prefix}Answer` as keyof RaffleLandingConfig,
-                              event.target.value,
-                            )
+                            updateLanding({ footerBrandText: event.target.value })
                           }
                         />
                       </label>
+                      <label className="field">
+                        <span>Teléfono footer</span>
+                        <input
+                          value={landing.footerPhone ?? ''}
+                          onChange={(event) => updateLanding({ footerPhone: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Email footer</span>
+                        <input
+                          value={landing.footerEmail ?? ''}
+                          onChange={(event) => updateLanding({ footerEmail: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Horario footer</span>
+                        <input
+                          value={landing.footerHours ?? ''}
+                          onChange={(event) => updateLanding({ footerHours: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Instagram URL</span>
+                        <input
+                          value={landing.instagramUrl ?? ''}
+                          onChange={(event) => updateLanding({ instagramUrl: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Facebook URL</span>
+                        <input
+                          value={landing.facebookUrl ?? ''}
+                          onChange={(event) => updateLanding({ facebookUrl: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>YouTube URL</span>
+                        <input
+                          value={landing.youtubeUrl ?? ''}
+                          onChange={(event) => updateLanding({ youtubeUrl: event.target.value })}
+                        />
+                      </label>
+                      <label className="field field-span-2">
+                        <span>Copyright</span>
+                        <input
+                          value={landing.copyrightText ?? ''}
+                          onChange={(event) => updateLanding({ copyrightText: event.target.value })}
+                        />
+                      </label>
                     </div>
-                  ))}
-                  <label className="field">
-                    <span>Título resultados</span>
-                    <input
-                      value={landing.resultsTitle ?? ''}
-                      onChange={(event) => updateLanding({ resultsTitle: event.target.value })}
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>Texto resultado pendiente</span>
-                    <input
-                      value={landing.resultsPendingText ?? ''}
-                      onChange={(event) =>
-                        updateLanding({ resultsPendingText: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>Texto del footer</span>
-                    <textarea
-                      rows={2}
-                      value={landing.footerBrandText ?? ''}
-                      onChange={(event) => updateLanding({ footerBrandText: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Teléfono footer</span>
-                    <input
-                      value={landing.footerPhone ?? ''}
-                      onChange={(event) => updateLanding({ footerPhone: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Email footer</span>
-                    <input
-                      value={landing.footerEmail ?? ''}
-                      onChange={(event) => updateLanding({ footerEmail: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Horario footer</span>
-                    <input
-                      value={landing.footerHours ?? ''}
-                      onChange={(event) => updateLanding({ footerHours: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Instagram URL</span>
-                    <input
-                      value={landing.instagramUrl ?? ''}
-                      onChange={(event) => updateLanding({ instagramUrl: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Facebook URL</span>
-                    <input
-                      value={landing.facebookUrl ?? ''}
-                      onChange={(event) => updateLanding({ facebookUrl: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>YouTube URL</span>
-                    <input
-                      value={landing.youtubeUrl ?? ''}
-                      onChange={(event) => updateLanding({ youtubeUrl: event.target.value })}
-                    />
-                  </label>
-                  <label className="field field-span-2">
-                    <span>Copyright</span>
-                    <input
-                      value={landing.copyrightText ?? ''}
-                      onChange={(event) => updateLanding({ copyrightText: event.target.value })}
-                    />
-                  </label>
-                </div>
+                  </div>
+                ) : null}
               </section>
 
               <aside className="landing-preview-card" aria-label="Vista previa de la landing">
                 <p className="panel-eyebrow">Vista previa</p>
                 <div className="landing-preview-hero">
                   {previewImage ? (
-                    <img src={previewImage} alt="" className="landing-preview-image" />
+                    <img
+                      src={previewImage}
+                      alt={previewPrizeLabel}
+                      className="landing-preview-image"
+                    />
                   ) : (
-                    <div className="landing-preview-image landing-preview-image-empty" />
+                    <div className="landing-preview-image landing-preview-image-empty">
+                      <span>{previewPrizeLabel}</span>
+                      <small>Sube una imagen en Portada para completar la vista.</small>
+                    </div>
                   )}
                   <div>
-                    <span className="badge badge-gold">{landing.heroBadge}</span>
+                    <span className="badge badge-gold">{previewBadge}</span>
                     <h3>
-                      {landing.heroTitle} <span className="accent">{landing.heroAccent}</span>
+                      {previewTitle}{' '}
+                      {previewAccent ? <span className="accent">{previewAccent}</span> : null}
                     </h3>
-                    <p className="muted">{landing.heroSubtitle}</p>
+                    <p className="muted">{previewSubtitle}</p>
+                    <div className="landing-preview-actions" aria-hidden="true">
+                      <span>{previewCtaLabel}</span>
+                    </div>
                   </div>
                 </div>
               </aside>

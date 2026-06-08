@@ -34,6 +34,13 @@ export const fetchPublicRaffle = async (slug: string): Promise<PublicRaffle> => 
   return response.data;
 };
 
+export const fetchCurrentPublicRaffle = async (): Promise<PublicRaffle> => {
+  const response = await requestJson<{ readonly data: PublicRaffle }>(
+    '/api/public/raffles/current',
+  );
+  return response.data;
+};
+
 export const fetchPublicRaffleNumbers = async (
   slug: string,
 ): Promise<readonly PublicRaffleNumber[]> => {

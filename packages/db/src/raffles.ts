@@ -410,6 +410,23 @@ export const getPublicActiveRaffleBySlug = async (slug: string): Promise<RaffleR
   }
 };
 
+export const getPublicCurrentActiveRaffle = async (): Promise<RaffleRow | null> => {
+  const { client, db } = createLocalPgliteDatabase();
+
+  try {
+    const [raffle] = await db
+      .select()
+      .from(raffles)
+      .where(eq(raffles.status, 'active'))
+      .orderBy(desc(raffles.updatedAt))
+      .limit(1);
+
+    return raffle ? applySellerDefaultsToRaffle(raffle) : null;
+  } finally {
+    await client.close();
+  }
+};
+
 export const listPublicRaffleNumbersBySlug = async (
   slug: string,
 ): Promise<readonly PublicRaffleNumberRow[] | null> => {

@@ -502,6 +502,37 @@ h4 {
   color: var(--navy-800);
 }
 
+.no-event-card {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  text-align: left;
+}
+
+.no-event-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: var(--navy-700);
+  font-weight: 900;
+}
+
+.no-event-card h2 {
+  margin: 0;
+  color: var(--navy-800);
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.no-event-card p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
 .purchase-label {
   margin: 12px 0 2px;
   font-size: 12px;

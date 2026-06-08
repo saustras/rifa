@@ -10,6 +10,7 @@ export {
   activateSellerRaffle,
   createPublicOrderForRaffle,
   createSellerRaffle,
+  getPublicCurrentActiveRaffle,
   getPublicActiveRaffleBySlug,
   getSellerActiveRaffle,
   getSellerRaffleById,

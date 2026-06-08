@@ -14,6 +14,7 @@ import {
   deleteSellerRafflePrize,
   ensureLocalSchema,
   getPublicActiveRaffleBySlug,
+  getPublicCurrentActiveRaffle,
   getPublicDrawResultBySlug,
   getPublicOrderStatus,
   getLocalDatabaseHealth,
@@ -1632,6 +1633,22 @@ const handlePublicRaffles = async (
 
   const slug = segments[3];
 
+  if (request.method === 'GET' && slug === 'current' && segments.length === 4) {
+    const data = await getPublicCurrentActiveRaffle();
+
+    if (!data) {
+      sendJson(response, 404, {
+        error: 'no_active_event',
+        message: 'Por ahora no hay eventos activos.',
+        path: pathname,
+      });
+      return true;
+    }
+
+    sendJson(response, 200, { data });
+    return true;
+  }
+
   if (request.method !== 'GET' || !slug) {
     if (request.method === 'POST' && slug && segments.length === 5 && segments[4] === 'orders') {
       const parsed = createPublicOrderSchema.safeParse(await readJsonBody(request));
@@ -1670,7 +1687,11 @@ const handlePublicRaffles = async (
     const data = await listPublicRaffleNumbersBySlug(slug);
 
     if (!data) {
-      sendJson(response, 404, { error: 'not_found', path: pathname });
+      sendJson(response, 404, {
+        error: 'not_found',
+        message: 'Esta campaña no está disponible.',
+        path: pathname,
+      });
       return true;
     }
 

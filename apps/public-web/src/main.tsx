@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 
 import {
   createPublicOrder,
+  fetchCurrentPublicRaffle,
   fetchPublicDrawResult,
   fetchPublicRaffle,
   fetchPublicRaffleNumbers,
@@ -15,12 +16,12 @@ import type { BuyerFormState, CampaignStats, CheckoutSession, PublicRaffle } fro
 
 import './styles.css';
 
-const getPublicRaffleSlug = (): string => {
+const getPublicRaffleSlug = (): string | null => {
   const querySlug = new URLSearchParams(window.location.search).get('slug');
   const pathSlug = window.location.pathname.split('/').filter(Boolean)[0];
   const envSlug = import.meta.env.VITE_DEFAULT_RAFFLE_SLUG as string | undefined;
 
-  return querySlug ?? pathSlug ?? envSlug ?? 'rifa-demo-moto-electrica';
+  return querySlug ?? pathSlug ?? envSlug ?? null;
 };
 
 const DEFAULT_RAFFLE_SLUG = getPublicRaffleSlug();
@@ -391,10 +392,14 @@ function App() {
 
     const loadCampaign = async () => {
       try {
+        const selectedRaffle = DEFAULT_RAFFLE_SLUG
+          ? await fetchPublicRaffle(DEFAULT_RAFFLE_SLUG)
+          : await fetchCurrentPublicRaffle();
+        const activeSlug = selectedRaffle.slug;
         const [loadedRaffle, numbers, result] = await Promise.all([
-          fetchPublicRaffle(DEFAULT_RAFFLE_SLUG),
-          fetchPublicRaffleNumbers(DEFAULT_RAFFLE_SLUG),
-          fetchPublicDrawResult(DEFAULT_RAFFLE_SLUG).catch(() => null),
+          Promise.resolve(selectedRaffle),
+          fetchPublicRaffleNumbers(activeSlug),
+          fetchPublicDrawResult(activeSlug).catch(() => null),
         ]);
 
         if (!active) {
@@ -450,9 +455,13 @@ function App() {
     setSubmitError('');
 
     try {
-      const activeRaffle = raffle ?? (await fetchPublicRaffle(DEFAULT_RAFFLE_SLUG));
+      if (!raffle) {
+        throw new Error('Por ahora no hay eventos activos.');
+      }
+
+      const activeRaffle = raffle;
       const result = await createPublicOrder({
-        slug: DEFAULT_RAFFLE_SLUG,
+        slug: activeRaffle.slug,
         raffle: activeRaffle,
         buyer: buyerForm,
         quantity,
@@ -543,190 +552,209 @@ function App() {
             </div>
 
             <aside className="purchase-card" id="comprar" aria-label="Compra tus participaciones">
-              <header>
-                <h2>{landing.purchaseTitle}</h2>
-                <p className="purchase-label">{landing.priceLabel}</p>
-                <p className="purchase-price">
-                  <span className="price-amount">{formatPriceDisplay(pricePerTicket)}</span>
-                  <span className="price-currency">COP</span>
-                </p>
-              </header>
-
-              <form onSubmit={handleSubmit} className="purchase-form">
-                <label className="quantity-row">
-                  <span className="field-label">Cantidad</span>
-                  <div className="quantity-control">
-                    <button
-                      type="button"
-                      aria-label="Disminuir cantidad"
-                      onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                    >
-                      −
-                    </button>
-                    <span aria-live="polite">{quantity}</span>
-                    <button
-                      type="button"
-                      aria-label="Aumentar cantidad"
-                      onClick={() => setQuantity((q) => Math.min(100, q + 1))}
-                    >
-                      +
-                    </button>
-                  </div>
-                </label>
-
-                <label className="input-field">
-                  <span aria-hidden="true" className="input-icon">
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.7" />
-                      <path
-                        d="M4 21a8 8 0 0116 0"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                        strokeLinecap="round"
-                      />
-                    </svg>
+              {!raffle && loadError ? (
+                <div className="no-event-card" role="status">
+                  <span className="no-event-icon" aria-hidden="true">
+                    ✦
                   </span>
-                  <input
-                    type="text"
-                    placeholder="Nombre completo"
-                    autoComplete="name"
-                    required
-                    value={buyerForm.fullName}
-                    onChange={(event) => updateBuyerField('fullName', event.target.value)}
-                  />
-                </label>
-
-                <label className="input-field">
-                  <span aria-hidden="true" className="input-icon">
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <rect
-                        x="3"
-                        y="5"
-                        width="18"
-                        height="14"
-                        rx="2.5"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                      />
-                      <path
-                        d="M7 10h6M7 14h10"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </span>
-                  <input
-                    type="text"
-                    placeholder="Número de documento"
-                    required
-                    value={buyerForm.documentNumber}
-                    onChange={(event) => updateBuyerField('documentNumber', event.target.value)}
-                  />
-                </label>
-
-                <label className="input-field">
-                  <span aria-hidden="true" className="input-icon">
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <rect
-                        x="3"
-                        y="5"
-                        width="18"
-                        height="14"
-                        rx="2.5"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                      />
-                      <path
-                        d="M3 7l9 6 9-6"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <input
-                    type="email"
-                    placeholder="Correo electrónico"
-                    autoComplete="email"
-                    required
-                    value={buyerForm.email}
-                    onChange={(event) => updateBuyerField('email', event.target.value)}
-                  />
-                </label>
-
-                <label className="input-field">
-                  <span aria-hidden="true" className="input-icon icon-whatsapp">
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <path
-                        d="M3.5 20.5l1.4-4.2a8 8 0 113.1 3.1L3.5 20.5z"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M9 10.2c.4 2 2 3.6 4 4l1-1.3a1 1 0 011.2-.3l1.4.6a1 1 0 01.6 1.2 3 3 0 01-3 2.2 7 7 0 01-6.6-6.6 3 3 0 012.2-3 1 1 0 011.2.6l.6 1.4a1 1 0 01-.3 1.2L9 10.2z"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <input
-                    type="tel"
-                    placeholder="WhatsApp (300 123 4567)"
-                    autoComplete="tel"
-                    required
-                    value={buyerForm.phone}
-                    onChange={(event) => updateBuyerField('phone', event.target.value)}
-                  />
-                </label>
-
-                {loadError ? (
-                  <p className="form-error" role="alert">
-                    {loadError}
+                  <h2>Por ahora no hay eventos activos</h2>
+                  <p>
+                    Estamos preparando la próxima campaña. Cuando haya una rifa activa, podrás
+                    comprar tus participaciones desde esta página.
                   </p>
-                ) : null}
-                {submitError ? (
-                  <p className="form-error" role="alert">
-                    {submitError}
-                  </p>
-                ) : null}
+                </div>
+              ) : (
+                <>
+                  <header>
+                    <h2>{landing.purchaseTitle}</h2>
+                    <p className="purchase-label">{landing.priceLabel}</p>
+                    <p className="purchase-price">
+                      <span className="price-amount">{formatPriceDisplay(pricePerTicket)}</span>
+                      <span className="price-currency">COP</span>
+                    </p>
+                  </header>
 
-                <button type="submit" className="btn btn-primary btn-block" disabled={isSubmitting}>
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <rect
-                      x="4"
-                      y="10"
-                      width="16"
-                      height="11"
-                      rx="2.5"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                    />
-                    <path
-                      d="M8 10V7a4 4 0 018 0v3"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  {isSubmitting ? 'Procesando…' : landing.submitButtonLabel}
-                </button>
+                  <form onSubmit={handleSubmit} className="purchase-form">
+                    <label className="quantity-row">
+                      <span className="field-label">Cantidad</span>
+                      <div className="quantity-control">
+                        <button
+                          type="button"
+                          aria-label="Disminuir cantidad"
+                          onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                        >
+                          −
+                        </button>
+                        <span aria-live="polite">{quantity}</span>
+                        <button
+                          type="button"
+                          aria-label="Aumentar cantidad"
+                          onClick={() => setQuantity((q) => Math.min(100, q + 1))}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </label>
 
-                {paymentMethods.length > 0 ? (
-                  <div className="payment-methods">
-                    <span>{landing.paymentMethodsLabel}</span>
-                    <div className="method-pills">
-                      {paymentMethods.map((method) => (
-                        <span key={method} className="pill">
-                          {method}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </form>
+                    <label className="input-field">
+                      <span aria-hidden="true" className="input-icon">
+                        <svg viewBox="0 0 24 24" fill="none">
+                          <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.7" />
+                          <path
+                            d="M4 21a8 8 0 0116 0"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="Nombre completo"
+                        autoComplete="name"
+                        required
+                        value={buyerForm.fullName}
+                        onChange={(event) => updateBuyerField('fullName', event.target.value)}
+                      />
+                    </label>
+
+                    <label className="input-field">
+                      <span aria-hidden="true" className="input-icon">
+                        <svg viewBox="0 0 24 24" fill="none">
+                          <rect
+                            x="3"
+                            y="5"
+                            width="18"
+                            height="14"
+                            rx="2.5"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                          />
+                          <path
+                            d="M7 10h6M7 14h10"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="Número de documento"
+                        required
+                        value={buyerForm.documentNumber}
+                        onChange={(event) => updateBuyerField('documentNumber', event.target.value)}
+                      />
+                    </label>
+
+                    <label className="input-field">
+                      <span aria-hidden="true" className="input-icon">
+                        <svg viewBox="0 0 24 24" fill="none">
+                          <rect
+                            x="3"
+                            y="5"
+                            width="18"
+                            height="14"
+                            rx="2.5"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                          />
+                          <path
+                            d="M3 7l9 6 9-6"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </span>
+                      <input
+                        type="email"
+                        placeholder="Correo electrónico"
+                        autoComplete="email"
+                        required
+                        value={buyerForm.email}
+                        onChange={(event) => updateBuyerField('email', event.target.value)}
+                      />
+                    </label>
+
+                    <label className="input-field">
+                      <span aria-hidden="true" className="input-icon icon-whatsapp">
+                        <svg viewBox="0 0 24 24" fill="none">
+                          <path
+                            d="M3.5 20.5l1.4-4.2a8 8 0 113.1 3.1L3.5 20.5z"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M9 10.2c.4 2 2 3.6 4 4l1-1.3a1 1 0 011.2-.3l1.4.6a1 1 0 01.6 1.2 3 3 0 01-3 2.2 7 7 0 01-6.6-6.6 3 3 0 012.2-3 1 1 0 011.2.6l.6 1.4a1 1 0 01-.3 1.2L9 10.2z"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </span>
+                      <input
+                        type="tel"
+                        placeholder="WhatsApp (300 123 4567)"
+                        autoComplete="tel"
+                        required
+                        value={buyerForm.phone}
+                        onChange={(event) => updateBuyerField('phone', event.target.value)}
+                      />
+                    </label>
+
+                    {loadError ? (
+                      <p className="form-error" role="alert">
+                        {loadError}
+                      </p>
+                    ) : null}
+                    {submitError ? (
+                      <p className="form-error" role="alert">
+                        {submitError}
+                      </p>
+                    ) : null}
+
+                    <button
+                      type="submit"
+                      className="btn btn-primary btn-block"
+                      disabled={isSubmitting}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <rect
+                          x="4"
+                          y="10"
+                          width="16"
+                          height="11"
+                          rx="2.5"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                        />
+                        <path
+                          d="M8 10V7a4 4 0 018 0v3"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                      {isSubmitting ? 'Procesando…' : landing.submitButtonLabel}
+                    </button>
+
+                    {paymentMethods.length > 0 ? (
+                      <div className="payment-methods">
+                        <span>{landing.paymentMethodsLabel}</span>
+                        <div className="method-pills">
+                          {paymentMethods.map((method) => (
+                            <span key={method} className="pill">
+                              {method}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </form>
+                </>
+              )}
             </aside>
 
             <div className="stats-card hero-stats" aria-label="Estado de la campaña">

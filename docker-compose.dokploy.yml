@@ -1,0 +1,94 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rifa}
+      POSTGRES_USER: ${POSTGRES_USER:-rifa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - rifa_postgres_data:/var/lib/postgresql/data
+    ports:
+      - '127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      API_DEV_TOKEN: ${API_DEV_TOKEN:?API_DEV_TOKEN is required}
+      PROOF_STORAGE_DIR: /data/proofs
+      CAMPAIGN_ASSETS_DIR: /data/campaign-assets
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp-mail.outlook.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_SELLER_CHAT_ID: ${TELEGRAM_SELLER_CHAT_ID:-}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-60}
+    volumes:
+      - rifa_api_data:/data
+    expose:
+      - '3000'
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(''http://127.0.0.1:3000/api/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  public-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        APP: public-web
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_DEFAULT_RAFFLE_SLUG: ${VITE_DEFAULT_RAFFLE_SLUG:-}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_UPSTREAM: http://api:3000
+    expose:
+      - '80'
+
+  admin-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        APP: admin-web
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_PUBLIC_WEB_URL: ${VITE_PUBLIC_WEB_URL:-}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_UPSTREAM: http://api:3000
+    expose:
+      - '80'
+
+volumes:
+  rifa_postgres_data:
+  rifa_api_data:

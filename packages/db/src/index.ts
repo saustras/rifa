@@ -1,5 +1,8 @@
 export {
+  createRifaDatabase,
   createLocalPgliteDatabase,
+  createPgliteDatabase,
+  createPostgresDatabase,
   DEFAULT_LOCAL_PGLITE_DATA_DIR,
   getLocalDatabaseHealth,
 } from './client';
@@ -22,6 +25,7 @@ export {
   updateSellerRafflePaymentQrImage,
 } from './campaign-assets';
 export { ensureLocalSchema } from './client';
+export type { RifaDatabaseDriver } from './client';
 export {
   approveSellerOrder,
   attachPaymentProofToOrder,

@@ -39,7 +39,7 @@ import {
   updateSellerRaffleCoverImage,
   updateSellerRafflePaymentQrImage,
   updateSellerRafflePrize,
-  createLocalPgliteDatabase,
+  createRifaDatabase,
 } from '@rifa/db';
 import { NOTIFICATION_CHANNELS, NOTIFICATION_JOB_STATUSES, NOTIFICATION_TYPES } from '@rifa/shared';
 import {
@@ -64,14 +64,14 @@ interface ApiHealthResponse {
 
 interface DatabaseHealthSuccessResponse {
   readonly ok: true;
-  readonly driver: 'pglite';
+  readonly driver: 'pglite' | 'postgresql';
   readonly sellersCount: number;
   readonly timestamp: string;
 }
 
 interface DatabaseHealthFailureResponse {
   readonly ok: false;
-  readonly driver: 'pglite';
+  readonly driver: 'pglite' | 'postgresql' | 'unknown';
   readonly error: string;
   readonly timestamp: string;
 }
@@ -671,14 +671,14 @@ const getDatabaseHealth = async (): Promise<
 
     return {
       ok: true,
-      driver: 'pglite',
+      driver: result.driver,
       sellersCount: result.sellersCount,
       timestamp: new Date().toISOString(),
     };
   } catch (error: unknown) {
     return {
       ok: false,
-      driver: 'pglite',
+      driver: 'unknown',
       error: toSafeErrorMessage(error),
       timestamp: new Date().toISOString(),
     };
@@ -1546,7 +1546,7 @@ export const createRifaApiServer = () =>
     })().catch((error: unknown) => {
       sendJson(response, 500, {
         ok: false,
-        driver: 'pglite',
+        driver: 'unknown',
         error: toSafeErrorMessage(error),
         timestamp: new Date().toISOString(),
       });
@@ -1557,7 +1557,7 @@ const port = Number(process.env.PORT ?? 3000);
 const server = createRifaApiServer();
 
 void (async () => {
-  const { client } = createLocalPgliteDatabase();
+  const { client } = createRifaDatabase();
 
   try {
     await ensureLocalSchema(client);

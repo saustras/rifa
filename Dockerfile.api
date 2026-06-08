@@ -1,0 +1,25 @@
+FROM node:20-alpine AS runtime
+
+WORKDIR /app
+
+ENV NX_DAEMON=false
+
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY packages/config/package.json packages/config/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/shared/package.json packages/shared/package.json
+COPY packages/validation/package.json packages/validation/package.json
+
+RUN pnpm install --frozen-lockfile --prod=false
+
+COPY apps/api apps/api
+COPY packages packages
+
+ENV NODE_ENV=production
+
+EXPOSE 3000
+
+CMD ["sh", "-c", "NX_DAEMON=false pnpm db:migrate && pnpm exec tsx apps/api/src/main.ts"]

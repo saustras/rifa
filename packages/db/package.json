@@ -9,6 +9,7 @@
     "@electric-sql/pglite": "^0.4.5",
     "@rifa/config": "workspace:*",
     "@rifa/shared": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.21.0"
   }
 }

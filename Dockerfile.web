@@ -1,0 +1,41 @@
+FROM node:20-alpine AS builder
+
+ARG APP
+ARG VITE_API_BASE_URL=
+ARG VITE_PUBLIC_WEB_URL=
+ARG VITE_DEFAULT_RAFFLE_SLUG=
+
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ENV VITE_PUBLIC_WEB_URL=${VITE_PUBLIC_WEB_URL}
+ENV VITE_DEFAULT_RAFFLE_SLUG=${VITE_DEFAULT_RAFFLE_SLUG}
+
+WORKDIR /app
+
+ENV NX_DAEMON=false
+
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/admin-web/package.json apps/admin-web/package.json
+COPY apps/public-web/package.json apps/public-web/package.json
+COPY packages/shared/package.json packages/shared/package.json
+
+RUN pnpm install --frozen-lockfile
+
+COPY apps/admin-web apps/admin-web
+COPY apps/public-web apps/public-web
+COPY packages/shared packages/shared
+
+RUN test -n "$APP" && pnpm nx build "$APP"
+
+FROM nginx:1.27-alpine AS runtime
+
+ARG APP
+ENV API_UPSTREAM=http://api:3000
+
+COPY deploy/nginx-web.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=builder /app/dist/apps/${APP} /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

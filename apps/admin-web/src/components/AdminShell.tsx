@@ -9,7 +9,6 @@ const NAV_ITEMS: ReadonlyArray<{ id: AdminView; label: string; icon: string }> =
   { id: 'orders', label: 'Órdenes', icon: '◈' },
   { id: 'participants', label: 'Participantes', icon: '◎' },
   { id: 'numbers', label: 'Números', icon: '#' },
-  { id: 'audit', label: 'Auditoría', icon: '◇' },
   { id: 'settings', label: 'Configuración', icon: '⚙' },
 ];
 
@@ -42,7 +41,6 @@ export const AdminShell = ({
     orders: 'Órdenes y pagos',
     participants: 'Participantes',
     numbers: 'Números',
-    audit: 'Auditoría y notificaciones',
     settings: 'Configuración',
   };
 
@@ -52,7 +50,6 @@ export const AdminShell = ({
     orders: 'Revisa comprobantes, aprueba o rechaza compras.',
     participants: 'Clientes que compraron participaciones en tus campañas.',
     numbers: 'Estado del inventario de números por campaña.',
-    audit: 'Historial de acciones y envíos de correo o Telegram.',
     settings: 'Credenciales de acceso y estado del sistema.',
   };
 

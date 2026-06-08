@@ -1,9 +1,7 @@
 import type {
-  AdminAuditLog,
   AdminCredentials,
   AdminCustomer,
   AdminLoginCredentials,
-  AdminNotificationLog,
   AdminPrize,
   AdminRaffle,
   AdminRaffleNumber,
@@ -359,26 +357,6 @@ export const fetchRaffleNumbers = async (
 ): Promise<readonly AdminRaffleNumber[]> => {
   const response = await requestAdminJson<{ readonly data: readonly AdminRaffleNumber[] }>(
     `/api/admin/raffles/${raffleId}/numbers`,
-    credentials,
-  );
-  return response.data;
-};
-
-export const fetchAuditLogs = async (
-  credentials: AdminCredentials,
-): Promise<readonly AdminAuditLog[]> => {
-  const response = await requestAdminJson<{ readonly data: readonly AdminAuditLog[] }>(
-    '/api/admin/audit-logs',
-    credentials,
-  );
-  return response.data;
-};
-
-export const fetchNotifications = async (
-  credentials: AdminCredentials,
-): Promise<readonly AdminNotificationLog[]> => {
-  const response = await requestAdminJson<{ readonly data: readonly AdminNotificationLog[] }>(
-    '/api/admin/notifications',
     credentials,
   );
   return response.data;

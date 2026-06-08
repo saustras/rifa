@@ -27,7 +27,6 @@ export type AdminView =
   | 'orders'
   | 'participants'
   | 'numbers'
-  | 'audit'
   | 'settings';
 
 export interface AdminCredentials {
@@ -208,26 +207,6 @@ export interface AdminRaffleNumber {
   readonly status: string;
   readonly reservedByOrderId: string | null;
   readonly assignedToOrderId: string | null;
-}
-
-export interface AdminAuditLog {
-  readonly id: string;
-  readonly entityType: string;
-  readonly entityId: string;
-  readonly action: string;
-  readonly createdAt: string;
-  readonly afterData: Record<string, unknown> | null;
-}
-
-export interface AdminNotificationLog {
-  readonly id: string;
-  readonly orderId: string | null;
-  readonly channel: string;
-  readonly type: string;
-  readonly recipient: string;
-  readonly status: string;
-  readonly errorMessage: string | null;
-  readonly createdAt: string;
 }
 
 export interface OrdersMetrics {

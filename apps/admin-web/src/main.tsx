@@ -4,16 +4,13 @@ import { createRoot } from 'react-dom/client';
 import { AdminShell } from './components/AdminShell';
 import {
   clearStoredSession,
-  fetchAuditLogs,
   fetchCustomers,
-  fetchNotifications,
   fetchOrders,
   fetchRaffles,
   getStoredSession,
   loginAdmin,
   toAdminCredentials,
 } from './api';
-import { AuditPage } from './pages/AuditPage';
 import { CampaignFormPage } from './pages/CampaignFormPage';
 import { CampaignsPage } from './pages/CampaignsPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -23,9 +20,7 @@ import { ParticipantsPage } from './pages/ParticipantsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import {
   REQUEST_STATUS,
-  type AdminAuditLog,
   type AdminCustomer,
-  type AdminNotificationLog,
   type AdminRaffle,
   type AdminSession,
   type AdminView,
@@ -46,8 +41,6 @@ function App() {
   const [orders, setOrders] = useState<readonly OrderListRow[]>([]);
   const [raffles, setRaffles] = useState<readonly AdminRaffle[]>([]);
   const [customers, setCustomers] = useState<readonly AdminCustomer[]>([]);
-  const [auditLogs, setAuditLogs] = useState<readonly AdminAuditLog[]>([]);
-  const [notifications, setNotifications] = useState<readonly AdminNotificationLog[]>([]);
   const [ordersStatus, setOrdersStatus] = useState<RequestStatus>(REQUEST_STATUS.loading);
   const [rafflesStatus, setRafflesStatus] = useState<RequestStatus>(REQUEST_STATUS.loading);
   const [message, setMessage] = useState<string>('');
@@ -66,20 +59,15 @@ function App() {
     setMessage('');
 
     try {
-      const [nextOrders, nextRaffles, nextCustomers, nextAuditLogs, nextNotifications] =
-        await Promise.all([
-          fetchOrders(credentials),
-          fetchRaffles(credentials),
-          fetchCustomers(credentials),
-          fetchAuditLogs(credentials),
-          fetchNotifications(credentials),
-        ]);
+      const [nextOrders, nextRaffles, nextCustomers] = await Promise.all([
+        fetchOrders(credentials),
+        fetchRaffles(credentials),
+        fetchCustomers(credentials),
+      ]);
 
       setOrders(nextOrders);
       setRaffles(nextRaffles);
       setCustomers(nextCustomers);
-      setAuditLogs(nextAuditLogs);
-      setNotifications(nextNotifications);
       setOrdersStatus(REQUEST_STATUS.success);
       setRafflesStatus(REQUEST_STATUS.success);
     } catch (error: unknown) {
@@ -116,8 +104,6 @@ function App() {
     setOrders([]);
     setRaffles([]);
     setCustomers([]);
-    setAuditLogs([]);
-    setNotifications([]);
     setCurrentView('dashboard');
   };
 
@@ -200,8 +186,6 @@ function App() {
         return <ParticipantsPage customers={customers} />;
       case 'numbers':
         return <NumbersPage credentials={credentials} raffles={raffles} />;
-      case 'audit':
-        return <AuditPage auditLogs={auditLogs} notifications={notifications} />;
       case 'settings':
         return <SettingsPage session={session} onLogout={handleLogout} />;
       default:

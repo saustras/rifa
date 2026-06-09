@@ -9,9 +9,9 @@ services:
     volumes:
       - rifa_postgres_data:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
+      - '127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432'
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -37,6 +37,7 @@ services:
       PROOF_STORAGE_DIR: /data/proofs
       CAMPAIGN_ASSETS_DIR: /data/campaign-assets
       EMAIL_FROM: ${EMAIL_FROM:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
       SMTP_HOST: ${SMTP_HOST:-smtp-mail.outlook.com}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}
@@ -49,12 +50,12 @@ services:
     volumes:
       - rifa_api_data:/data
     ports:
-      - "127.0.0.1:${API_HOST_PORT:-3000}:3000"
+      - '127.0.0.1:${API_HOST_PORT:-3000}:3000'
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+          'CMD-SHELL',
+          'node -e "fetch(''http://127.0.0.1:3000/api/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
         ]
       interval: 15s
       timeout: 5s
@@ -75,7 +76,7 @@ services:
     environment:
       API_UPSTREAM: http://api:3000
     ports:
-      - "${PUBLIC_WEB_HOST_PORT:-80}:80"
+      - '127.0.0.1:${PUBLIC_WEB_HOST_PORT:-18081}:80'
 
   admin-web:
     build:
@@ -92,8 +93,26 @@ services:
     environment:
       API_UPSTREAM: http://api:3000
     ports:
-      - "${ADMIN_WEB_HOST_PORT:-8080}:80"
+      - '127.0.0.1:${ADMIN_WEB_HOST_PORT:-8080}:80'
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      public-web:
+        condition: service_started
+      admin-web:
+        condition: service_started
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - '80:80'
+      - '443:443'
 
 volumes:
   rifa_postgres_data:
   rifa_api_data:
+  caddy_data:
+  caddy_config:

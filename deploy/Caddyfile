@@ -1,0 +1,13 @@
+{
+  email admin@labellamj.com
+}
+
+dinamicas.labellamj.com {
+  encode gzip zstd
+  reverse_proxy public-web:80
+}
+
+admin.labellamj.com {
+  encode gzip zstd
+  reverse_proxy admin-web:80
+}

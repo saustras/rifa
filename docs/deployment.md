@@ -71,9 +71,33 @@ curl -fsS http://127.0.0.1:8080/ >/dev/null && echo ADMIN_WEB_OK
 
 Public endpoints in the lightweight setup:
 
-- Public web: `http://<vps-ip>/`
-- API through public web proxy: `http://<vps-ip>/api/health`
-- Admin web: `http://<vps-ip>:8080/` if the provider firewall allows port `8080`.
+- Public web: `https://dinamicas.labellamj.com/`
+- API through public web proxy: `https://dinamicas.labellamj.com/api/health`
+- Admin web: `https://admin.labellamj.com/`
+- Admin tunnel fallback: `http://127.0.0.1:18080/`
+
+DNS records:
+
+```text
+A dinamicas 216.250.112.93
+A admin     216.250.112.93
+```
+
+The lightweight stack uses Caddy for HTTPS termination on ports `80` and `443`, proxying:
+
+```text
+dinamicas.labellamj.com -> public-web:80
+admin.labellamj.com     -> admin-web:80
+```
+
+Resend email configuration lives only in `/opt/rifa/.env`:
+
+```text
+EMAIL_FROM="La Bella MJ <noreply@labellamj.com>"
+RESEND_API_KEY=<rotated Resend key>
+```
+
+If `RESEND_API_KEY` is configured, Resend is used for buyer emails. SMTP remains as fallback.
 
 Admin login is JWT-based:
 

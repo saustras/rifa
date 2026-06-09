@@ -125,6 +125,8 @@ const DEFAULT_EMAIL_FROM = 'federendon26@hotmail.com';
 const DEFAULT_SMTP_HOST = 'smtp-mail.outlook.com';
 const DEFAULT_SMTP_PORT = 587;
 const EMAIL_FROM = process.env.EMAIL_FROM ?? DEFAULT_EMAIL_FROM;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const RESEND_API_URL = 'https://api.resend.com/emails';
 const SMTP_HOST = process.env.SMTP_HOST ?? DEFAULT_SMTP_HOST;
 const SMTP_PORT = Number(process.env.SMTP_PORT ?? DEFAULT_SMTP_PORT);
 const SMTP_SECURE = (process.env.SMTP_SECURE ?? 'false').toLowerCase() === 'true';
@@ -418,7 +420,11 @@ const escapeHtml = (value: string): string =>
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 
-const getSmtpConfigurationError = (): string | undefined => {
+const getEmailConfigurationError = (): string | undefined => {
+  if (isConfiguredSecret(RESEND_API_KEY)) {
+    return undefined;
+  }
+
   if (!Number.isInteger(SMTP_PORT) || SMTP_PORT <= 0) {
     return 'SMTP_PORT is missing or invalid; email dispatch skipped.';
   }
@@ -433,6 +439,49 @@ const getSmtpConfigurationError = (): string | undefined => {
 
   if (!isConfiguredSecret(SMTP_PASSWORD)) {
     return 'SMTP_PASSWORD is missing or contains a placeholder; email dispatch skipped.';
+  }
+
+  return undefined;
+};
+
+const sendBuyerOrderEmailWithResend = async ({
+  to,
+  subject,
+  text,
+  html,
+}: {
+  readonly to: string;
+  readonly subject: string;
+  readonly text: string;
+  readonly html: string;
+}): Promise<string | undefined> => {
+  if (!isConfiguredSecret(RESEND_API_KEY)) {
+    return undefined;
+  }
+
+  const response = await fetch(RESEND_API_URL, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${RESEND_API_KEY}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: EMAIL_FROM,
+      to,
+      subject,
+      text,
+      html,
+    }),
+  });
+
+  const body = (await response.json().catch(() => ({}))) as unknown;
+
+  if (!response.ok) {
+    throw new Error(`Resend email dispatch failed with HTTP ${response.status}`);
+  }
+
+  if (typeof body === 'object' && body !== null && 'id' in body && typeof body.id === 'string') {
+    return body.id;
   }
 
   return undefined;
@@ -493,6 +542,12 @@ const sendBuyerOrderEmail = async ({
   readonly text: string;
   readonly html: string;
 }): Promise<string | undefined> => {
+  const resendMessageId = await sendBuyerOrderEmailWithResend({ to, subject, text, html });
+
+  if (resendMessageId) {
+    return resendMessageId;
+  }
+
   const transporter = nodemailer.createTransport({
     host: SMTP_HOST,
     port: SMTP_PORT,
@@ -609,7 +664,7 @@ const notifyBuyerOrderEmail = async (
   };
 
   try {
-    const configurationError = getSmtpConfigurationError();
+    const configurationError = getEmailConfigurationError();
 
     if (configurationError) {
       await upsertNotificationLog({

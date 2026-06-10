@@ -55,18 +55,28 @@ export const updateSellerSettings = async ({
 }: UpdateSellerSettingsInput): Promise<SellerSettings | null> => {
   const { client, db } = createLocalPgliteDatabase();
   const nextSettings = cleanSettings(settings);
+  const sellerName = nextSettings.brandName?.trim() || DEFAULT_SELLER_SETTINGS.brandName || 'ORYUM';
+  const sellerEmail =
+    nextSettings.supportEmail?.trim() || DEFAULT_SELLER_SETTINGS.supportEmail || 'correo@dominio.com';
+  const sellerValues = {
+    name: sellerName,
+    email: sellerEmail,
+    phone: nextSettings.supportPhone?.trim() || null,
+    settings: nextSettings,
+    updatedAt: new Date(),
+  };
 
   try {
     const [updated] = await db
-      .update(sellers)
-      .set({
-        name: nextSettings.brandName?.trim() || DEFAULT_SELLER_SETTINGS.brandName,
-        email: nextSettings.supportEmail?.trim() || DEFAULT_SELLER_SETTINGS.supportEmail,
-        phone: nextSettings.supportPhone?.trim() || null,
-        settings: nextSettings,
-        updatedAt: new Date(),
+      .insert(sellers)
+      .values({
+        id: sellerId,
+        ...sellerValues,
       })
-      .where(eq(sellers.id, sellerId))
+      .onConflictDoUpdate({
+        target: sellers.id,
+        set: sellerValues,
+      })
       .returning({ settings: sellers.settings });
 
     return updated ? cleanSettings(updated.settings) : null;

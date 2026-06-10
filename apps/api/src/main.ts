@@ -1749,6 +1749,20 @@ const handleAdminInsights = async (
   return true;
 };
 
+const handlePublicSellerSettings = async (
+  request: IncomingMessage,
+  response: ServerResponse,
+  pathname: string,
+): Promise<boolean> => {
+  if (pathname !== '/api/public/seller-settings' || request.method !== 'GET') {
+    return false;
+  }
+
+  const data = await getSellerSettings({ sellerId: ADMIN_SELLER_ID });
+  sendJson(response, 200, { data });
+  return true;
+};
+
 const handlePublicRaffles = async (
   request: IncomingMessage,
   response: ServerResponse,
@@ -1999,6 +2013,10 @@ export const createRifaApiServer = () =>
       }
 
       if (await handleAdminNumbers(request, response, pathname)) {
+        return;
+      }
+
+      if (await handlePublicSellerSettings(request, response, pathname)) {
         return;
       }
 

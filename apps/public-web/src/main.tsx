@@ -1,4 +1,4 @@
-import { DEFAULT_LANDING_CONFIG, type ParticipationPackage } from '@rifa/shared';
+import { DEFAULT_LANDING_CONFIG, type ParticipationPackage, type RaffleLandingConfig, type SellerSettings } from '@rifa/shared';
 import { useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 
@@ -8,6 +8,7 @@ import {
   fetchPublicDrawResult,
   fetchPublicRaffle,
   fetchPublicRaffleNumbers,
+  fetchPublicSellerSettings,
 } from './api';
 import type { PublicDrawResult } from './api';
 import { Logo } from './components/Logo';
@@ -78,6 +79,31 @@ const normalizeParticipationPackages = (
       quantity: item.quantity,
       ...(item.label ? { label: item.label } : {}),
     }));
+};
+
+const sellerSettingsToLandingDefaults = (
+  settings: SellerSettings | null,
+): Partial<RaffleLandingConfig> => {
+  if (!settings) {
+    return {};
+  }
+
+  return {
+    brandName: settings.brandName,
+    brandSubtitle: settings.brandSubtitle,
+    organizerCompany: settings.organizerCompany,
+    organizerTaxId: settings.organizerTaxId,
+    organizerAddress: settings.organizerAddress,
+    organizerCity: settings.organizerCity,
+    footerPhone: settings.supportPhone,
+    footerEmail: settings.supportEmail,
+    footerHours: settings.supportHours,
+    instagramUrl: settings.instagramUrl,
+    facebookUrl: settings.facebookUrl,
+    youtubeUrl: settings.youtubeUrl,
+    footerBrandText: settings.footerBrandText,
+    copyrightText: settings.copyrightText,
+  };
 };
 
 interface CountdownState {
@@ -331,6 +357,7 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string>('');
   const [loadError, setLoadError] = useState<string>('');
+  const [sellerSettings, setSellerSettings] = useState<SellerSettings | null>(null);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
   const [countdown, setCountdown] = useState<CountdownState>(() =>
     computeCountdown(FALLBACK_CAMPAIGN_END_ISO),
@@ -338,7 +365,11 @@ function App() {
   const [navScrolled, setNavScrolled] = useState<boolean>(false);
 
   const pricePerTicket = raffle ? Number(raffle.pricePerNumber) : 10_000;
-  const landing = { ...DEFAULT_LANDING_CONFIG, ...(raffle?.landingConfig ?? {}) };
+  const landing: RaffleLandingConfig = {
+    ...DEFAULT_LANDING_CONFIG,
+    ...sellerSettingsToLandingDefaults(sellerSettings),
+    ...(raffle?.landingConfig ?? {}),
+  };
   const participationPackages = normalizeParticipationPackages(landing.participationPackages);
   const hasParticipationPackages = participationPackages.length > 0;
   const heroImageSrc = raffle?.coverImageUrl ?? '/motorcycle-prize-nobg.png';
@@ -453,6 +484,16 @@ function App() {
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    void fetchPublicSellerSettings()
+      .then((data) => {
+        setSellerSettings(data);
+      })
+      .catch(() => {
+        setSellerSettings(null);
+      });
   }, []);
 
   useEffect(() => {

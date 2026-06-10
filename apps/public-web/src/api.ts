@@ -1,4 +1,5 @@
 import type { BuyerFormState, CreatedOrder, PublicRaffle, PublicRaffleNumber } from './types';
+import type { SellerSettings } from '@rifa/shared';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -30,6 +31,13 @@ const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
 export const fetchPublicRaffle = async (slug: string): Promise<PublicRaffle> => {
   const response = await requestJson<{ readonly data: PublicRaffle }>(
     `/api/public/raffles/${slug}`,
+  );
+  return response.data;
+};
+
+export const fetchPublicSellerSettings = async (): Promise<SellerSettings> => {
+  const response = await requestJson<{ readonly data: SellerSettings }>(
+    '/api/public/seller-settings',
   );
   return response.data;
 };

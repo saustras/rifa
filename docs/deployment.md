@@ -99,6 +99,18 @@ RESEND_API_KEY=<rotated Resend key>
 
 If `RESEND_API_KEY` is configured, Resend is used for buyer emails. SMTP remains as fallback.
 
+Seller Telegram notifications require these values in `/opt/rifa/.env`:
+
+```text
+ADMIN_WEB_URL=https://admin.labellamj.com
+TELEGRAM_BOT_TOKEN=<telegram bot token>
+TELEGRAM_SELLER_CHAT_ID=<seller chat id>
+```
+
+When a buyer uploads a payment proof, the API sends a Telegram message with a direct
+`ADMIN_WEB_URL/orders?orderId=...` review link. The admin app opens that order so the
+seller can inspect the proof image and approve or reject the purchase.
+
 Admin login is JWT-based:
 
 - `ADMIN_USERNAME` — admin username.

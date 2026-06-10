@@ -16,7 +16,9 @@ interface OrdersPageProps {
   readonly credentials: AdminCredentials;
   readonly orders: readonly OrderListRow[];
   readonly ordersStatus: RequestStatus;
+  readonly focusedOrderId: string;
   readonly onRefresh: () => void;
+  readonly onFocusedOrderHandled: () => void;
   readonly message: string;
   readonly setMessage: (message: string) => void;
 }
@@ -25,7 +27,9 @@ export const OrdersPage = ({
   credentials,
   orders,
   ordersStatus,
+  focusedOrderId,
   onRefresh,
+  onFocusedOrderHandled,
   message,
   setMessage,
 }: OrdersPageProps) => {
@@ -41,6 +45,25 @@ export const OrdersPage = ({
   const [actionStatus, setActionStatus] = useState<RequestStatus>(REQUEST_STATUS.idle);
 
   useEffect(() => {
+    if (!focusedOrderId || orders.length === 0) {
+      return;
+    }
+
+    if (orders.some((order) => order.id === focusedOrderId)) {
+      setSelectedOrderId(focusedOrderId);
+      onFocusedOrderHandled();
+      return;
+    }
+
+    setMessage('La orden del enlace no está disponible o no pertenece a este vendedor.');
+    onFocusedOrderHandled();
+  }, [focusedOrderId, onFocusedOrderHandled, orders, setMessage]);
+
+  useEffect(() => {
+    if (focusedOrderId) {
+      return;
+    }
+
     if (orders.length === 0) {
       setSelectedOrderId('');
       return;
@@ -55,7 +78,7 @@ export const OrdersPage = ({
         '';
       setSelectedOrderId(nextId);
     }
-  }, [orders, selectedOrderId]);
+  }, [focusedOrderId, orders, selectedOrderId]);
 
   useEffect(() => {
     if (!selectedOrderId) {

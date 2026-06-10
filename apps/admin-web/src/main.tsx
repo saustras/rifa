@@ -30,13 +30,35 @@ import {
 import { getMetrics } from './utils';
 import './styles.css';
 
+interface InitialAdminRoute {
+  readonly view: AdminView;
+  readonly orderId: string;
+}
+
+const getInitialAdminRoute = (): InitialAdminRoute => {
+  if (window.location.pathname === '/orders') {
+    return {
+      view: 'orders',
+      orderId: new URLSearchParams(window.location.search).get('orderId') ?? '',
+    };
+  }
+
+  return {
+    view: 'dashboard',
+    orderId: '',
+  };
+};
+
+const INITIAL_ADMIN_ROUTE = getInitialAdminRoute();
+
 function App() {
   const [session, setSession] = useState<AdminSession | null>(getStoredSession);
   const [loginUsername, setLoginUsername] = useState('admin');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginStatus, setLoginStatus] = useState<RequestStatus>(REQUEST_STATUS.idle);
   const [loginMessage, setLoginMessage] = useState('');
-  const [currentView, setCurrentView] = useState<AdminView>('dashboard');
+  const [currentView, setCurrentView] = useState<AdminView>(INITIAL_ADMIN_ROUTE.view);
+  const [focusedOrderId, setFocusedOrderId] = useState<string>(INITIAL_ADMIN_ROUTE.orderId);
   const [editingRaffleId, setEditingRaffleId] = useState<string | null>(null);
   const [orders, setOrders] = useState<readonly OrderListRow[]>([]);
   const [raffles, setRaffles] = useState<readonly AdminRaffle[]>([]);
@@ -92,6 +114,9 @@ function App() {
       setSession(nextSession);
       setLoginPassword('');
       setLoginStatus(REQUEST_STATUS.success);
+      if (focusedOrderId) {
+        setCurrentView('orders');
+      }
     } catch (error: unknown) {
       setLoginStatus(REQUEST_STATUS.error);
       setLoginMessage(error instanceof Error ? error.message : 'No se pudo iniciar sesión.');
@@ -105,6 +130,7 @@ function App() {
     setRaffles([]);
     setCustomers([]);
     setCurrentView('dashboard');
+    setFocusedOrderId('');
   };
 
   const handleCampaignFormDone = () => {
@@ -177,7 +203,9 @@ function App() {
             credentials={credentials}
             orders={orders}
             ordersStatus={ordersStatus}
+            focusedOrderId={focusedOrderId}
             onRefresh={() => void loadData()}
+            onFocusedOrderHandled={() => setFocusedOrderId('')}
             message={message}
             setMessage={setMessage}
           />

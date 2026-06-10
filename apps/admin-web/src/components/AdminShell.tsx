@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { PUBLIC_WEB_URL } from '../config';
 import type { AdminView } from '../types';
@@ -33,6 +33,7 @@ export const AdminShell = ({
   onLogout,
   children,
 }: AdminShellProps) => {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const shellView = currentView === 'campaign-form' ? 'campaigns' : currentView;
 
   const pageTitle: Record<Exclude<AdminView, 'campaign-form'>, string> = {
@@ -57,9 +58,38 @@ export const AdminShell = ({
     ? `${PUBLIC_WEB_URL}/?slug=${activeRaffleSlug}`
     : PUBLIC_WEB_URL;
 
+  const handleNavigate = (view: AdminView): void => {
+    onNavigate(view);
+    setIsMobileMenuOpen(false);
+  };
+
   return (
-    <div className="admin-app">
-      <aside className="admin-sidebar" aria-label="Navegación principal">
+    <div className={`admin-app${isMobileMenuOpen ? ' is-mobile-menu-open' : ''}`}>
+      <button
+        type="button"
+        className="mobile-menu-button"
+        aria-label={isMobileMenuOpen ? 'Cerrar menú' : 'Abrir menú'}
+        aria-expanded={isMobileMenuOpen}
+        aria-controls="admin-sidebar"
+        onClick={() => setIsMobileMenuOpen((isOpen) => !isOpen)}
+      >
+        <span aria-hidden="true">☰</span>
+      </button>
+
+      {isMobileMenuOpen ? (
+        <button
+          type="button"
+          className="mobile-menu-backdrop"
+          aria-label="Cerrar menú de navegación"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      ) : null}
+
+      <aside
+        id="admin-sidebar"
+        className="admin-sidebar"
+        aria-label="Navegación principal"
+      >
         <a className="sidebar-brand" href="#">
           <span className="sidebar-brand-mark" aria-hidden="true">
             <svg viewBox="0 0 40 40" fill="none">
@@ -79,7 +109,7 @@ export const AdminShell = ({
               key={item.id}
               type="button"
               className={`sidebar-link${shellView === item.id ? ' is-active' : ''}`}
-              onClick={() => onNavigate(item.id)}
+              onClick={() => handleNavigate(item.id)}
             >
               <span className="sidebar-link-icon" aria-hidden="true">
                 {item.icon}

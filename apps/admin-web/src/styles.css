@@ -158,6 +158,11 @@ button:disabled {
   color: #fff;
 }
 
+.mobile-menu-button,
+.mobile-menu-backdrop {
+  display: none;
+}
+
 .sidebar-brand {
   display: flex;
   align-items: center;
@@ -898,34 +903,74 @@ button:disabled {
 
 @media (max-width: 860px) {
   .admin-app {
-    grid-template-columns: 1fr;
+    display: block;
   }
 
   .admin-sidebar {
-    position: sticky;
+    position: fixed;
     top: 0;
-    z-index: 20;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    padding: 0.75rem;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: min(82vw, var(--sidebar-width));
+    overflow-y: auto;
+    transform: translateX(-105%);
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform 180ms ease;
+    box-shadow: 22px 0 45px rgba(3, 18, 43, 0.28);
+  }
+
+  .admin-app.is-mobile-menu-open .admin-sidebar {
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
   }
 
   .sidebar-nav {
-    display: flex;
-    flex-wrap: wrap;
-    width: 100%;
+    display: grid;
   }
 
-  .sidebar-help,
   .sidebar-user {
-    display: none;
+    display: flex;
+  }
+
+  .mobile-menu-button {
+    position: fixed;
+    top: 0.85rem;
+    left: 0.85rem;
+    z-index: 60;
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--bg-card);
+    color: var(--navy-900);
+    box-shadow: var(--shadow-md);
+    font-size: 1.25rem;
+    font-weight: 800;
+  }
+
+  .mobile-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: block;
+    border: 0;
+    background: rgba(3, 18, 43, 0.48);
+    backdrop-filter: blur(2px);
   }
 
   .admin-topbar,
   .admin-content {
     padding-left: 1rem;
     padding-right: 1rem;
+  }
+
+  .admin-topbar {
+    padding-top: 4.25rem;
   }
 
   .kpi-grid {

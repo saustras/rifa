@@ -92,6 +92,19 @@ interface AdminContext {
   readonly sellerId: string;
 }
 
+interface TelegramInlineKeyboardButton {
+  readonly text: string;
+  readonly url: string;
+}
+
+interface TelegramInlineKeyboardRow {
+  readonly buttons: readonly TelegramInlineKeyboardButton[];
+}
+
+interface TelegramReplyMarkup {
+  readonly inlineKeyboard: readonly TelegramInlineKeyboardRow[];
+}
+
 const ADMIN_ROLES = {
   admin: 'admin',
 } as const;
@@ -121,10 +134,11 @@ const CAMPAIGN_ASSETS_DIR = process.env.CAMPAIGN_ASSETS_DIR ?? './packages/db/ca
 const COMPRESSED_PROOF_MIME_TYPE = 'image/webp';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_SELLER_CHAT_ID = process.env.TELEGRAM_SELLER_CHAT_ID;
-const DEFAULT_EMAIL_FROM = 'federendon26@hotmail.com';
+const DEFAULT_EMAIL_FROM = 'La Bella MJ <noreply@labellamj.com>';
 const DEFAULT_SMTP_HOST = 'smtp-mail.outlook.com';
 const DEFAULT_SMTP_PORT = 587;
 const EMAIL_FROM = process.env.EMAIL_FROM ?? DEFAULT_EMAIL_FROM;
+const ADMIN_WEB_URL = process.env.ADMIN_WEB_URL ?? 'http://localhost:5174';
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_API_URL = 'https://api.resend.com/emails';
 const SMTP_HOST = process.env.SMTP_HOST ?? DEFAULT_SMTP_HOST;
@@ -139,6 +153,33 @@ const toSafeErrorMessage = (error: unknown): string => {
   }
 
   return 'Unknown error';
+};
+
+const buildAdminOrderUrl = (orderId: string): string => {
+  const baseUrl = ADMIN_WEB_URL.trim() || 'http://localhost:5174';
+
+  try {
+    const url = new URL('/orders', baseUrl);
+    url.searchParams.set('orderId', orderId);
+
+    return url.toString();
+  } catch {
+    const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+
+    return `${normalizedBaseUrl}/orders?orderId=${encodeURIComponent(orderId)}`;
+  }
+};
+
+const toTelegramReplyMarkup = (
+  replyMarkup: TelegramReplyMarkup | undefined,
+): { readonly inline_keyboard: readonly (readonly TelegramInlineKeyboardButton[])[] } | undefined => {
+  if (!replyMarkup) {
+    return undefined;
+  }
+
+  return {
+    inline_keyboard: replyMarkup.inlineKeyboard.map((row) => row.buttons),
+  };
 };
 
 const sendJson = (response: ServerResponse, statusCode: number, body: JsonResponse): void => {
@@ -388,10 +429,12 @@ const sendTelegramMessage = async ({
   token,
   chatId,
   text,
+  replyMarkup,
 }: {
   readonly token: string;
   readonly chatId: string;
   readonly text: string;
+  readonly replyMarkup?: TelegramReplyMarkup;
 }): Promise<string | undefined> => {
   const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
@@ -400,6 +443,7 @@ const sendTelegramMessage = async ({
       chat_id: chatId,
       text,
       disable_web_page_preview: true,
+      reply_markup: toTelegramReplyMarkup(replyMarkup),
     }),
   });
 
@@ -582,11 +626,29 @@ const notifySellerPaymentProofUploaded = async ({
   const recipient = isConfiguredSecret(TELEGRAM_SELLER_CHAT_ID)
     ? TELEGRAM_SELLER_CHAT_ID
     : 'telegram:unconfigured';
+  const detail = await getSellerOrderDetail({ sellerId, orderId });
+  const adminOrderUrl = buildAdminOrderUrl(orderId);
+  const orderTotal = detail ? `${detail.order.amount} ${detail.order.currency}` : 'por revisar';
+  const customerLine = detail
+    ? `${detail.customer.fullName} (${detail.customer.phone})`
+    : 'Cliente por revisar';
+  const raffleTitle = detail?.raffle.title ?? raffleId;
   const payload = {
     orderId,
     raffleId,
+    adminOrderUrl,
     event: 'payment_proof_uploaded',
-    message: `Nuevo comprobante de pago pendiente de revisión. Orden: ${orderId}`,
+    message: [
+      '🧾 Nueva compra con comprobante pendiente',
+      '',
+      `Cliente: ${customerLine}`,
+      `Campaña: ${raffleTitle}`,
+      `Orden: ${orderId}`,
+      `Monto: ${orderTotal}`,
+      '',
+      'Revisa el comprobante en el admin para aprobar o rechazar la compra.',
+      adminOrderUrl,
+    ].join('\n'),
   };
 
   try {
@@ -611,6 +673,18 @@ const notifySellerPaymentProofUploaded = async ({
       token: TELEGRAM_BOT_TOKEN,
       chatId: TELEGRAM_SELLER_CHAT_ID,
       text: payload.message,
+      replyMarkup: {
+        inlineKeyboard: [
+          {
+            buttons: [
+              {
+                text: 'Revisar compra en admin',
+                url: adminOrderUrl,
+              },
+            ],
+          },
+        ],
+      },
     });
 
     await upsertNotificationLog({

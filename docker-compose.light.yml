@@ -36,6 +36,7 @@ services:
       ADMIN_JWT_TTL_SECONDS: ${ADMIN_JWT_TTL_SECONDS:-28800}
       PROOF_STORAGE_DIR: /data/proofs
       CAMPAIGN_ASSETS_DIR: /data/campaign-assets
+      ADMIN_WEB_URL: ${ADMIN_WEB_URL:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       SMTP_HOST: ${SMTP_HOST:-smtp-mail.outlook.com}

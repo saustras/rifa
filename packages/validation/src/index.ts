@@ -56,6 +56,15 @@ const adminRaffleFieldsSchema = z.object({
       purchaseTitle: z.string().max(120).optional(),
       priceLabel: z.string().max(80).optional(),
       submitButtonLabel: z.string().max(120).optional(),
+      participationPackages: z
+        .array(
+          z.object({
+            label: z.string().max(80).optional(),
+            quantity: z.coerce.number().int().min(1).max(100),
+          }),
+        )
+        .max(12)
+        .optional(),
       paymentMethodsLabel: z.string().max(80).optional(),
       paymentMethodOne: z.string().max(80).optional(),
       paymentMethodTwo: z.string().max(80).optional(),

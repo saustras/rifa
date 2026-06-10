@@ -980,6 +980,15 @@ button:disabled {
   .campaign-meta {
     grid-template-columns: 1fr;
   }
+
+  .package-editor-head,
+  .package-row {
+    grid-template-columns: 1fr;
+  }
+
+  .package-editor-head {
+    display: grid;
+  }
 }
 
 .sr-only {
@@ -1125,6 +1134,57 @@ button:disabled {
 .marketing-tab-panel {
   display: grid;
   gap: 0.9rem;
+}
+
+.numbers-settings {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.package-editor {
+  display: grid;
+  gap: 0.85rem;
+  grid-column: 1 / -1;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #f8fafc;
+  padding: 1rem;
+}
+
+.package-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.package-editor-head h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.package-empty {
+  margin: 0;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.85rem;
+}
+
+.package-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.package-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(120px, 0.6fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  padding: 0.85rem;
 }
 
 .marketing-fields h3,
@@ -1468,6 +1528,22 @@ button:disabled {
 .preview-purchase-card strong {
   display: block;
   font-size: 1.2rem;
+}
+
+.preview-package-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.preview-package-grid span {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.25rem 0.5rem;
 }
 
 .preview-purchase-card button {

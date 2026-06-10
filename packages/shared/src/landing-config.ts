@@ -1,3 +1,8 @@
+export interface ParticipationPackage {
+  readonly label?: string | undefined;
+  readonly quantity: number;
+}
+
 export interface RaffleLandingConfig {
   readonly heroBadge?: string | undefined;
   readonly heroTitle?: string | undefined;
@@ -10,6 +15,7 @@ export interface RaffleLandingConfig {
   readonly purchaseTitle?: string | undefined;
   readonly priceLabel?: string | undefined;
   readonly submitButtonLabel?: string | undefined;
+  readonly participationPackages?: readonly ParticipationPackage[] | undefined;
   readonly paymentMethodsLabel?: string | undefined;
   readonly paymentMethodOne?: string | undefined;
   readonly paymentMethodTwo?: string | undefined;

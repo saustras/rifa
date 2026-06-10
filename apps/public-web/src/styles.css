@@ -616,6 +616,65 @@ h4 {
   place-items: center;
 }
 
+.package-picker {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.package-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.package-option {
+  display: grid;
+  gap: 3px;
+  min-height: 62px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--text-strong);
+  padding: 10px 12px;
+  text-align: left;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.package-option:hover {
+  border-color: var(--navy-500);
+  background: #f8fbff;
+  transform: translateY(-1px);
+}
+
+.package-option.is-selected {
+  border-color: var(--navy-800);
+  background: linear-gradient(135deg, #061b3f, #0d3470);
+  box-shadow: 0 12px 24px rgba(6, 27, 63, 0.18);
+  color: #fff;
+}
+
+.package-option strong {
+  font-size: 0.92rem;
+  line-height: 1.15;
+}
+
+.package-option span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.package-option.is-selected span {
+  color: rgba(255, 255, 255, 0.78);
+}
+
 .input-field {
   position: relative;
   display: flex;
@@ -1573,6 +1632,10 @@ h4 {
   .trust-grid {
     grid-template-columns: 1fr 1fr;
     max-width: 100%;
+  }
+
+  .package-options {
+    grid-template-columns: 1fr;
   }
 
   .stats-card {

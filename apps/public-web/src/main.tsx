@@ -1,4 +1,4 @@
-import { DEFAULT_LANDING_CONFIG } from '@rifa/shared';
+import { DEFAULT_LANDING_CONFIG, type ParticipationPackage } from '@rifa/shared';
 import { useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 
@@ -52,6 +52,32 @@ const buildCampaignStats = (
     availableTickets: Math.max(0, totalTickets - occupiedTickets),
     soldPercentage,
   };
+};
+
+const normalizeParticipationPackages = (
+  packages: readonly ParticipationPackage[] | undefined,
+): readonly ParticipationPackage[] => {
+  const seenQuantities = new Set<number>();
+
+  return (packages ?? [])
+    .map((item) => ({
+      label: item.label?.trim(),
+      quantity: Math.trunc(Number(item.quantity)),
+    }))
+    .filter((item) => Number.isFinite(item.quantity) && item.quantity >= 1 && item.quantity <= 100)
+    .filter((item) => {
+      if (seenQuantities.has(item.quantity)) {
+        return false;
+      }
+
+      seenQuantities.add(item.quantity);
+      return true;
+    })
+    .sort((left, right) => left.quantity - right.quantity)
+    .map((item) => ({
+      quantity: item.quantity,
+      ...(item.label ? { label: item.label } : {}),
+    }));
 };
 
 interface CountdownState {
@@ -313,6 +339,8 @@ function App() {
 
   const pricePerTicket = raffle ? Number(raffle.pricePerNumber) : 10_000;
   const landing = { ...DEFAULT_LANDING_CONFIG, ...(raffle?.landingConfig ?? {}) };
+  const participationPackages = normalizeParticipationPackages(landing.participationPackages);
+  const hasParticipationPackages = participationPackages.length > 0;
   const heroImageSrc = raffle?.coverImageUrl ?? '/motorcycle-prize-nobg.png';
   const heroImageAlt = landing.prizeLabel ?? raffle?.title ?? 'Premio de la campaña';
   const drawSummary =
@@ -436,6 +464,14 @@ function App() {
       window.clearInterval(interval);
     };
   }, [campaignEndIso]);
+
+  useEffect(() => {
+    const firstPackage = participationPackages[0];
+
+    if (firstPackage && !participationPackages.some((item) => item.quantity === quantity)) {
+      setQuantity(firstPackage.quantity);
+    }
+  }, [participationPackages, quantity]);
 
   useEffect(() => {
     const onScroll = () => setNavScrolled(window.scrollY > 12);
@@ -575,26 +611,52 @@ function App() {
                   </header>
 
                   <form onSubmit={handleSubmit} className="purchase-form">
-                    <label className="quantity-row">
-                      <span className="field-label">Cantidad</span>
-                      <div className="quantity-control">
-                        <button
-                          type="button"
-                          aria-label="Disminuir cantidad"
-                          onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                        >
-                          −
-                        </button>
-                        <span aria-live="polite">{quantity}</span>
-                        <button
-                          type="button"
-                          aria-label="Aumentar cantidad"
-                          onClick={() => setQuantity((q) => Math.min(100, q + 1))}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </label>
+                    {hasParticipationPackages ? (
+                      <fieldset className="package-picker">
+                        <legend className="field-label">Elige tu paquete</legend>
+                        <div className="package-options">
+                          {participationPackages.map((item) => {
+                            const isSelected = quantity === item.quantity;
+                            const label = item.label?.trim() || `${item.quantity} números`;
+                            const total = pricePerTicket * item.quantity;
+
+                            return (
+                              <button
+                                key={item.quantity}
+                                type="button"
+                                className={`package-option${isSelected ? ' is-selected' : ''}`}
+                                aria-pressed={isSelected}
+                                onClick={() => setQuantity(item.quantity)}
+                              >
+                                <strong>{label}</strong>
+                                <span>{formatPriceDisplay(total)} COP</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </fieldset>
+                    ) : (
+                      <label className="quantity-row">
+                        <span className="field-label">Cantidad</span>
+                        <div className="quantity-control">
+                          <button
+                            type="button"
+                            aria-label="Disminuir cantidad"
+                            onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                          >
+                            −
+                          </button>
+                          <span aria-live="polite">{quantity}</span>
+                          <button
+                            type="button"
+                            aria-label="Aumentar cantidad"
+                            onClick={() => setQuantity((q) => Math.min(100, q + 1))}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </label>
+                    )}
 
                     <label className="input-field">
                       <span aria-hidden="true" className="input-icon">

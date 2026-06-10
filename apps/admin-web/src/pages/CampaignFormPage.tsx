@@ -22,6 +22,7 @@ import type {
   AdminPrize,
   CreateRaffleInput,
   DrawResult,
+  ParticipationPackage,
   RaffleLandingConfig,
   SellerSettings,
   UpdateRaffleInput,
@@ -113,11 +114,26 @@ const GLOBAL_LANDING_FIELDS = new Set<keyof RaffleLandingConfig>([
 ]);
 
 const toCampaignLandingConfig = (landing: RaffleLandingConfig): RaffleLandingConfig => {
-  const campaignLanding: Record<string, string | undefined> = {};
+  const campaignLanding: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(landing)) {
-    if (!GLOBAL_LANDING_FIELDS.has(key as keyof RaffleLandingConfig)) {
-      campaignLanding[key] = value;
+    const landingKey = key as keyof RaffleLandingConfig;
+
+    if (GLOBAL_LANDING_FIELDS.has(landingKey)) {
+      continue;
+    }
+
+    if (landingKey === 'participationPackages') {
+      const packages = normalizeParticipationPackages(landing.participationPackages);
+
+      if (packages.length > 0) {
+        campaignLanding.participationPackages = packages;
+      }
+      continue;
+    }
+
+    if (typeof value === 'string') {
+      campaignLanding[landingKey] = value;
     }
   }
 
@@ -147,6 +163,39 @@ const formatPreviewCurrency = (value: number, currency: string): string =>
     currency: currency || 'COP',
     maximumFractionDigits: 0,
   }).format(Number.isFinite(value) ? value : 0);
+
+const normalizeParticipationPackages = (
+  packages: readonly ParticipationPackage[] | undefined,
+): readonly ParticipationPackage[] => {
+  const seenQuantities = new Set<number>();
+
+  return (packages ?? [])
+    .map((item) => ({
+      label: item.label?.trim(),
+      quantity: Math.trunc(Number(item.quantity)),
+    }))
+    .filter((item) => Number.isFinite(item.quantity) && item.quantity >= 1 && item.quantity <= 100)
+    .filter((item) => {
+      if (seenQuantities.has(item.quantity)) {
+        return false;
+      }
+
+      seenQuantities.add(item.quantity);
+      return true;
+    })
+    .sort((left, right) => left.quantity - right.quantity)
+    .slice(0, 12)
+    .map((item) => ({
+      quantity: item.quantity,
+      ...(item.label ? { label: item.label } : {}),
+    }));
+};
+
+const getLandingTextField = (landing: RaffleLandingConfig, field: keyof RaffleLandingConfig): string => {
+  const value = landing[field];
+
+  return typeof value === 'string' ? value : '';
+};
 
 export const CampaignFormPage = ({
   credentials,
@@ -304,6 +353,42 @@ export const CampaignFormPage = ({
 
   const updateLandingField = (field: keyof RaffleLandingConfig, value: string) => {
     updateLanding({ [field]: value } as Partial<RaffleLandingConfig>);
+  };
+
+  const participationPackages = normalizeParticipationPackages(landing.participationPackages);
+
+  const updateParticipationPackage = (
+    index: number,
+    patch: Partial<ParticipationPackage>,
+  ): void => {
+    const currentPackages = [...participationPackages];
+    const currentPackage = currentPackages[index];
+
+    if (!currentPackage) {
+      return;
+    }
+
+    currentPackages[index] = { ...currentPackage, ...patch };
+    updateLanding({ participationPackages: currentPackages });
+  };
+
+  const addParticipationPackage = (): void => {
+    const lastPackage = participationPackages[participationPackages.length - 1];
+    const lastQuantity = lastPackage?.quantity ?? 0;
+    const nextQuantity = Math.min(100, Math.max(1, lastQuantity + 10));
+
+    updateLanding({
+      participationPackages: [
+        ...participationPackages,
+        { label: `${nextQuantity} números`, quantity: nextQuantity },
+      ],
+    });
+  };
+
+  const removeParticipationPackage = (index: number): void => {
+    updateLanding({
+      participationPackages: participationPackages.filter((_, itemIndex) => itemIndex !== index),
+    });
   };
 
   const buildPayload = (): CreateRaffleInput | UpdateRaffleInput => ({
@@ -1000,7 +1085,10 @@ export const CampaignFormPage = ({
                           <label className="field">
                             <span>{label} — etiqueta</span>
                             <input
-                              value={landing[`${prefix}Label` as keyof RaffleLandingConfig] ?? ''}
+                              value={getLandingTextField(
+                                landing,
+                                `${prefix}Label` as keyof RaffleLandingConfig,
+                              )}
                               onChange={(event) =>
                                 updateLandingField(
                                   `${prefix}Label` as keyof RaffleLandingConfig,
@@ -1012,7 +1100,10 @@ export const CampaignFormPage = ({
                           <label className="field">
                             <span>{label} — valor</span>
                             <input
-                              value={landing[`${prefix}Value` as keyof RaffleLandingConfig] ?? ''}
+                              value={getLandingTextField(
+                                landing,
+                                `${prefix}Value` as keyof RaffleLandingConfig,
+                              )}
                               onChange={(event) =>
                                 updateLandingField(
                                   `${prefix}Value` as keyof RaffleLandingConfig,
@@ -1024,7 +1115,10 @@ export const CampaignFormPage = ({
                           <label className="field field-span-2">
                             <span>{label} — texto menor</span>
                             <input
-                              value={landing[`${prefix}Sub` as keyof RaffleLandingConfig] ?? ''}
+                              value={getLandingTextField(
+                                landing,
+                                `${prefix}Sub` as keyof RaffleLandingConfig,
+                              )}
                               onChange={(event) =>
                                 updateLandingField(
                                   `${prefix}Sub` as keyof RaffleLandingConfig,
@@ -1086,9 +1180,10 @@ export const CampaignFormPage = ({
                           <label className="field">
                             <span>{label} — pregunta</span>
                             <input
-                              value={
-                                landing[`${prefix}Question` as keyof RaffleLandingConfig] ?? ''
-                              }
+                              value={getLandingTextField(
+                                landing,
+                                `${prefix}Question` as keyof RaffleLandingConfig,
+                              )}
                               onChange={(event) =>
                                 updateLandingField(
                                   `${prefix}Question` as keyof RaffleLandingConfig,
@@ -1101,7 +1196,10 @@ export const CampaignFormPage = ({
                             <span>{label} — respuesta</span>
                             <textarea
                               rows={2}
-                              value={landing[`${prefix}Answer` as keyof RaffleLandingConfig] ?? ''}
+                              value={getLandingTextField(
+                                landing,
+                                `${prefix}Answer` as keyof RaffleLandingConfig,
+                              )}
                               onChange={(event) =>
                                 updateLandingField(
                                   `${prefix}Answer` as keyof RaffleLandingConfig,
@@ -1189,6 +1287,15 @@ export const CampaignFormPage = ({
                         <span>{landing.priceLabel?.trim() || 'Valor por número'}</span>
                         <strong>{previewPrice}</strong>
                       </div>
+                      {participationPackages.length > 0 ? (
+                        <div className="preview-package-grid" aria-hidden="true">
+                          {participationPackages.map((item) => (
+                            <span key={item.quantity}>
+                              {item.label?.trim() || `${item.quantity} números`}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                       <button type="button" tabIndex={-1} aria-hidden="true">
                         {previewCtaLabel}
                       </button>
@@ -1288,58 +1395,124 @@ export const CampaignFormPage = ({
           ) : null}
 
           {activeTab === 'numbers' ? (
-            <div className="form-grid">
-              {!raffleId ? (
-                <>
-                  <label className="field">
-                    <span>Número mínimo</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={form.numberMin ?? 0}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          numberMin: Number(event.target.value),
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Número máximo</span>
-                    <input
-                      type="number"
-                      min={0}
-                      required
-                      value={form.numberMax}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          numberMax: Number(event.target.value),
-                        }))
-                      }
-                    />
-                  </label>
-                </>
-              ) : (
-                <p className="muted field-span-2">
-                  Rango actual: {form.numberMin ?? 0} – {form.numberMax}. Los números no se pueden
-                  cambiar después de crear la campaña.
-                </p>
-              )}
-              <label className="field">
-                <span>Modo de asignación</span>
-                <select
-                  value={form.assignmentMode ?? 'customer_choice'}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, assignmentMode: event.target.value }))
-                  }
-                  disabled={Boolean(raffleId)}
-                >
-                  <option value="customer_choice">El cliente elige números</option>
-                  <option value="random">Asignación aleatoria</option>
-                </select>
-              </label>
+            <div className="numbers-settings">
+              <div className="form-grid">
+                {!raffleId ? (
+                  <>
+                    <label className="field">
+                      <span>Número mínimo</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={form.numberMin ?? 0}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            numberMin: Number(event.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Número máximo</span>
+                      <input
+                        type="number"
+                        min={0}
+                        required
+                        value={form.numberMax}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            numberMax: Number(event.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <p className="muted field-span-2">
+                    Rango actual: {form.numberMin ?? 0} – {form.numberMax}. Los números no se pueden
+                    cambiar después de crear la campaña.
+                  </p>
+                )}
+                <label className="field">
+                  <span>Modo de asignación</span>
+                  <select
+                    value={form.assignmentMode ?? 'customer_choice'}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, assignmentMode: event.target.value }))
+                    }
+                    disabled={Boolean(raffleId)}
+                  >
+                    <option value="customer_choice">El cliente elige números</option>
+                    <option value="random">Asignación aleatoria</option>
+                  </select>
+                </label>
+              </div>
+
+              <section className="package-editor" aria-labelledby="package-editor-title">
+                <div className="package-editor-head">
+                  <div>
+                    <h3 id="package-editor-title">Paquetes visibles en la landing</h3>
+                    <p className="muted">
+                      Agrega opciones como 10, 20, 30 o 40 números para que el cliente elija rápido.
+                      Si no agregas paquetes, la landing mantiene el selector libre de cantidad.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={participationPackages.length >= 12}
+                    onClick={addParticipationPackage}
+                  >
+                    Agregar paquete
+                  </button>
+                </div>
+
+                {participationPackages.length === 0 ? (
+                  <p className="package-empty muted">
+                    Sin paquetes configurados. La landing permitirá elegir cantidad con + y −.
+                  </p>
+                ) : (
+                  <div className="package-list">
+                    {participationPackages.map((item, index) => (
+                      <div className="package-row" key={`${item.quantity}-${index}`}>
+                        <label className="field">
+                          <span>Etiqueta</span>
+                          <input
+                            value={item.label ?? ''}
+                            placeholder={`${item.quantity} números`}
+                            onChange={(event) =>
+                              updateParticipationPackage(index, { label: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Cantidad</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={item.quantity}
+                            onChange={(event) =>
+                              updateParticipationPackage(index, {
+                                quantity: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => removeParticipationPackage(index)}
+                        >
+                          Quitar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           ) : null}
 

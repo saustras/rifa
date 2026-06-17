@@ -9,7 +9,7 @@ import { auditLogs, raffles } from './schema';
 
 const CAMPAIGN_ASSETS_DIR = process.env.CAMPAIGN_ASSETS_DIR ?? './packages/db/campaign-assets';
 
-export type CampaignAssetKind = 'cover' | 'qr';
+export type CampaignAssetKind = 'cover' | 'qr' | 'winner' | 'gallery';
 
 const toExtension = (mimeType: string): string => {
   if (mimeType === 'image/png') {

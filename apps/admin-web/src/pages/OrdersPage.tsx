@@ -1,10 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
-import { approveOrder, fetchOrderDetail, rejectOrder, requestAdminBlob } from '../api';
+import {
+  approveOrder,
+  createManualOrder,
+  fetchOrderDetail,
+  rejectOrder,
+  requestAdminBlob,
+} from '../api';
+import { prepareImageForUpload } from '../image';
 import {
   ORDER_STATUS,
   REQUEST_STATUS,
   type AdminCredentials,
+  type AdminRaffle,
   type OrderDetail,
   type OrderListRow,
   type OrderStatus,
@@ -15,6 +23,7 @@ import { formatDate, formatMoney, toStatusLabel } from '../utils';
 interface OrdersPageProps {
   readonly credentials: AdminCredentials;
   readonly orders: readonly OrderListRow[];
+  readonly raffles: readonly AdminRaffle[];
   readonly ordersStatus: RequestStatus;
   readonly focusedOrderId: string;
   readonly onRefresh: () => void;
@@ -23,9 +32,32 @@ interface OrdersPageProps {
   readonly setMessage: (message: string) => void;
 }
 
+interface ManualFormState {
+  readonly raffleId: string;
+  readonly fullName: string;
+  readonly documentNumber: string;
+  readonly email: string;
+  readonly phone: string;
+  readonly city: string;
+  readonly quantity: string;
+  readonly specificNumbers: string;
+}
+
+const emptyManualForm = (raffleId: string): ManualFormState => ({
+  raffleId,
+  fullName: '',
+  documentNumber: '',
+  email: '',
+  phone: '',
+  city: '',
+  quantity: '1',
+  specificNumbers: '',
+});
+
 export const OrdersPage = ({
   credentials,
   orders,
+  raffles,
   ordersStatus,
   focusedOrderId,
   onRefresh,
@@ -33,14 +65,93 @@ export const OrdersPage = ({
   message,
   setMessage,
 }: OrdersPageProps) => {
+  const sellableRaffles = raffles.filter(
+    (raffle) => raffle.status === 'active' || raffle.status === 'paused',
+  );
+  const defaultRaffleId =
+    sellableRaffles.find((raffle) => raffle.status === 'active')?.id ??
+    sellableRaffles[0]?.id ??
+    raffles[0]?.id ??
+    '';
+
+  const [isManualOpen, setIsManualOpen] = useState(false);
+  const [manualForm, setManualForm] = useState<ManualFormState>(() =>
+    emptyManualForm(defaultRaffleId),
+  );
+  const [manualProof, setManualProof] = useState<File | null>(null);
+  const [manualStatus, setManualStatus] = useState<RequestStatus>(REQUEST_STATUS.idle);
+  const [manualError, setManualError] = useState('');
+
+  const updateManualField = (field: keyof ManualFormState, value: string) => {
+    setManualForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const openManual = () => {
+    setManualForm(emptyManualForm(defaultRaffleId));
+    setManualProof(null);
+    setManualError('');
+    setManualStatus(REQUEST_STATUS.idle);
+    setIsManualOpen(true);
+  };
+
+  const handleManualSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setManualError('');
+
+    const parsedSpecific = manualForm.specificNumbers
+      .split(/[\s,]+/)
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+      .map((value) => Number(value));
+
+    if (parsedSpecific.some((value) => !Number.isInteger(value) || value < 0)) {
+      setManualError('Los números específicos deben ser enteros válidos separados por coma.');
+      return;
+    }
+
+    const quantity = Number(manualForm.quantity);
+
+    if (parsedSpecific.length === 0 && (!Number.isInteger(quantity) || quantity < 1)) {
+      setManualError('Indica una cantidad válida o una lista de números específicos.');
+      return;
+    }
+
+    setManualStatus(REQUEST_STATUS.loading);
+
+    try {
+      const proof = manualProof ? await prepareImageForUpload(manualProof) : undefined;
+
+      await createManualOrder(credentials, {
+        ...(manualForm.raffleId ? { raffleId: manualForm.raffleId } : {}),
+        fullName: manualForm.fullName.trim(),
+        documentNumber: manualForm.documentNumber.trim(),
+        email: manualForm.email.trim(),
+        phone: manualForm.phone.trim(),
+        ...(manualForm.city.trim() ? { city: manualForm.city.trim() } : {}),
+        ...(parsedSpecific.length > 0
+          ? { selectedNumbers: parsedSpecific }
+          : { numbersRequested: quantity }),
+        ...(proof ? { proof } : {}),
+      });
+
+      setManualStatus(REQUEST_STATUS.success);
+      setIsManualOpen(false);
+      setMessage('Compra manual registrada y aprobada. Los números quedaron asignados.');
+      onRefresh();
+    } catch (error: unknown) {
+      setManualStatus(REQUEST_STATUS.error);
+      setManualError(
+        error instanceof Error ? error.message : 'No se pudo registrar la compra manual.',
+      );
+    }
+  };
+
   const [selectedOrderId, setSelectedOrderId] = useState<string>('');
   const [selectedDetail, setSelectedDetail] = useState<OrderDetail | null>(null);
   const [proofUrl, setProofUrl] = useState<string>('');
   const [search, setSearch] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<OrderStatus>(ORDER_STATUS.all);
-  const [rejectionReason, setRejectionReason] = useState<string>(
-    'Comprobante no válido o incompleto.',
-  );
+  const [rejectionReason, setRejectionReason] = useState<string>('');
   const [detailStatus, setDetailStatus] = useState<RequestStatus>(REQUEST_STATUS.idle);
   const [actionStatus, setActionStatus] = useState<RequestStatus>(REQUEST_STATUS.idle);
 
@@ -141,6 +252,10 @@ export const OrdersPage = ({
     };
   }, [credentials, selectedOrderId, setMessage]);
 
+  useEffect(() => {
+    setRejectionReason(selectedDetail?.order.rejectionReason ?? '');
+  }, [selectedDetail?.order.id, selectedDetail?.order.rejectionReason]);
+
   const filteredOrders = orders.filter((order) => {
     const matchesStatus = statusFilter === ORDER_STATUS.all || order.status === statusFilter;
     const searchTarget = [
@@ -222,6 +337,9 @@ export const OrdersPage = ({
               <option value={ORDER_STATUS.rejected}>Rechazadas</option>
             </select>
           </label>
+          <button type="button" className="btn btn-primary toolbar-cta" onClick={openManual}>
+            + Compra manual
+          </button>
         </div>
 
         {ordersStatus === REQUEST_STATUS.loading ? (
@@ -364,6 +482,7 @@ export const OrdersPage = ({
               <textarea
                 value={rejectionReason}
                 onChange={(event) => setRejectionReason(event.target.value)}
+                placeholder="Escribe el motivo real para informar al comprador."
                 disabled={!canReview || actionStatus === REQUEST_STATUS.loading}
               />
             </label>
@@ -395,6 +514,135 @@ export const OrdersPage = ({
           </p>
         ) : null}
       </aside>
+
+      {isManualOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Compra manual">
+          <div className="modal-card panel">
+            <header className="panel-head panel-head-row">
+              <div>
+                <h2>Registrar compra manual</h2>
+                <p className="muted">
+                  La orden se crea aprobada y los números se asignan de inmediato.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setIsManualOpen(false)}
+              >
+                Cerrar
+              </button>
+            </header>
+
+            <form className="manual-order-form" onSubmit={(event) => void handleManualSubmit(event)}>
+              <div className="form-grid">
+                <label className="field field-span-2">
+                  <span>Campaña</span>
+                  <select
+                    value={manualForm.raffleId}
+                    onChange={(event) => updateManualField('raffleId', event.target.value)}
+                  >
+                    {raffles.length === 0 ? <option value="">Sin campañas</option> : null}
+                    {raffles.map((raffle) => (
+                      <option key={raffle.id} value={raffle.id}>
+                        {raffle.title} ({raffle.status})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Nombre completo *</span>
+                  <input
+                    value={manualForm.fullName}
+                    onChange={(event) => updateManualField('fullName', event.target.value)}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>Documento *</span>
+                  <input
+                    value={manualForm.documentNumber}
+                    onChange={(event) => updateManualField('documentNumber', event.target.value)}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>Email *</span>
+                  <input
+                    type="email"
+                    value={manualForm.email}
+                    onChange={(event) => updateManualField('email', event.target.value)}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>WhatsApp / teléfono *</span>
+                  <input
+                    value={manualForm.phone}
+                    onChange={(event) => updateManualField('phone', event.target.value)}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>Ciudad</span>
+                  <input
+                    value={manualForm.city}
+                    onChange={(event) => updateManualField('city', event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>Cantidad de números</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={manualForm.quantity}
+                    onChange={(event) => updateManualField('quantity', event.target.value)}
+                  />
+                </label>
+                <label className="field field-span-2">
+                  <span>Números específicos (opcional)</span>
+                  <input
+                    placeholder="Ej: 12, 34, 99 (deja vacío para asignar automáticamente)"
+                    value={manualForm.specificNumbers}
+                    onChange={(event) => updateManualField('specificNumbers', event.target.value)}
+                  />
+                </label>
+                <label className="field field-span-2">
+                  <span>Comprobante del cliente (opcional)</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                    onChange={(event) => setManualProof(event.target.files?.[0] ?? null)}
+                  />
+                  {manualProof ? <small className="muted">{manualProof.name}</small> : null}
+                </label>
+              </div>
+
+              {manualError ? <p className="alert alert-error">{manualError}</p> : null}
+
+              <div className="panel-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setIsManualOpen(false)}
+                  disabled={manualStatus === REQUEST_STATUS.loading}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={manualStatus === REQUEST_STATUS.loading}
+                >
+                  {manualStatus === REQUEST_STATUS.loading
+                    ? 'Registrando…'
+                    : 'Registrar compra'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

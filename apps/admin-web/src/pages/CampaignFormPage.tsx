@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { ImageUploadField } from '../components/ImageUploadField';
 import {
+  AdminApiError,
   activateRaffle,
   createPrize,
   createRaffle,
@@ -14,7 +15,6 @@ import {
   registerDrawResult,
   updateRaffle,
   uploadRaffleCover,
-  uploadRafflePaymentQr,
 } from '../api';
 import { PUBLIC_WEB_URL } from '../config';
 import type {
@@ -28,8 +28,28 @@ import type {
   UpdateRaffleInput,
 } from '../types';
 
-type FormTab = 'general' | 'marketing' | 'numbers' | 'payments' | 'draw';
+type FormTab = 'general' | 'marketing' | 'numbers' | 'draw';
 type MarketingTab = 'cover' | 'hero' | 'trust' | 'steps' | 'faq' | 'footer';
+
+const TOAST_KIND = {
+  ERROR: 'error',
+  SUCCESS: 'success',
+} as const;
+
+type ToastKind = (typeof TOAST_KIND)[keyof typeof TOAST_KIND];
+
+interface CampaignToast {
+  readonly kind: ToastKind;
+  readonly title: string;
+  readonly message: string;
+  readonly details?: readonly string[];
+}
+
+interface SaveErrorFeedback {
+  readonly summary: string;
+  readonly details: readonly string[];
+  readonly fieldNames: readonly string[];
+}
 
 interface CampaignFormPageProps {
   readonly credentials: AdminCredentials;
@@ -54,7 +74,42 @@ const defaultForm: CreateRaffleInput = {
   paymentAccountHolder: '',
   paymentAccountNumber: '',
   paymentInstructions: '',
+  drawDate: '',
   landingConfig: { ...DEFAULT_LANDING_CONFIG },
+};
+
+const pad2 = (value: number): string => value.toString().padStart(2, '0');
+
+// Converts a stored ISO datetime into the "YYYY-MM-DD" value an <input type=date>
+// expects, using local date parts so the day doesn't shift across timezones.
+const isoToDateInput = (iso: string | null | undefined): string => {
+  if (!iso) {
+    return '';
+  }
+
+  const date = new Date(iso);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+};
+
+// Converts a "YYYY-MM-DD" picker value into an ISO datetime at the END of that
+// day in the admin's local timezone, so the campaign lasts the whole chosen day.
+const dateInputToIso = (dateValue: string | undefined): string | undefined => {
+  if (!dateValue) {
+    return undefined;
+  }
+
+  const date = new Date(`${dateValue}T23:59:59`);
+
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+
+  return date.toISOString();
 };
 
 const slugify = (value: string): string =>
@@ -144,7 +199,6 @@ const TAB_LABELS: Record<FormTab, string> = {
   general: 'General',
   marketing: 'Publicidad',
   numbers: 'Participaciones',
-  payments: 'Pagos',
   draw: 'Sorteo',
 };
 
@@ -173,6 +227,7 @@ const normalizeParticipationPackages = (
     .map((item) => ({
       label: item.label?.trim(),
       quantity: Math.trunc(Number(item.quantity)),
+      price: item.price === undefined ? undefined : Number(item.price),
     }))
     .filter((item) => Number.isFinite(item.quantity) && item.quantity >= 1 && item.quantity <= 100)
     .filter((item) => {
@@ -188,13 +243,79 @@ const normalizeParticipationPackages = (
     .map((item) => ({
       quantity: item.quantity,
       ...(item.label ? { label: item.label } : {}),
+      ...(Number.isFinite(item.price) && Number(item.price) > 0 ? { price: Number(item.price) } : {}),
     }));
+};
+
+const getPackagePrice = (item: ParticipationPackage, fallbackPricePerNumber: number): number => {
+  const configuredPrice = Number(item.price);
+
+  return Number.isFinite(configuredPrice) && configuredPrice > 0
+    ? configuredPrice
+    : fallbackPricePerNumber * item.quantity;
 };
 
 const getLandingTextField = (landing: RaffleLandingConfig, field: keyof RaffleLandingConfig): string => {
   const value = landing[field];
 
   return typeof value === 'string' ? value : '';
+};
+
+const CAMPAIGN_FIELD_LABELS: Record<string, string> = {
+  slug: 'Slug',
+  title: 'Título',
+  description: 'Descripción',
+  status: 'Estado',
+  pricePerNumber: 'Precio por número',
+  currency: 'Moneda',
+  numberMin: 'Número mínimo',
+  numberMax: 'Número máximo',
+  numberPadding: 'Cifras',
+  assignmentMode: 'Modo de asignación',
+  coverImageUrl: 'Imagen de portada',
+  paymentQrImageUrl: 'QR de pago',
+  paymentMethodLabel: 'Método de pago',
+  paymentAccountHolder: 'Titular de la cuenta',
+  paymentAccountType: 'Tipo de cuenta',
+  paymentAccountNumber: 'Número de cuenta',
+  paymentDocumentNumber: 'Documento de pago',
+  paymentInstructions: 'Instrucciones de pago',
+  drawSourceName: 'Fuente del sorteo',
+  drawRule: 'Regla del sorteo',
+  terms: 'Términos y condiciones',
+};
+
+const formatValidationMessage = (fieldName: string, message: string): string => {
+  if (message.includes('at least 3 character')) {
+    return `${CAMPAIGN_FIELD_LABELS[fieldName] ?? fieldName}: mínimo 3 caracteres.`;
+  }
+
+  if (message === 'Invalid') {
+    return `${CAMPAIGN_FIELD_LABELS[fieldName] ?? fieldName}: usa solo minúsculas, números y guiones, sin espacios ni símbolos.`;
+  }
+
+  return `${CAMPAIGN_FIELD_LABELS[fieldName] ?? fieldName}: ${message}`;
+};
+
+const getSaveErrorFeedback = (saveError: unknown): SaveErrorFeedback => {
+  if (saveError instanceof AdminApiError && saveError.details?.fieldErrors) {
+    const fieldNames = Object.keys(saveError.details.fieldErrors);
+    const details = Object.entries(saveError.details.fieldErrors).flatMap(([fieldName, messages]) =>
+      messages.map((message) => formatValidationMessage(fieldName, message)),
+    );
+
+    return {
+      details,
+      fieldNames,
+      summary: 'Revisa los campos marcados antes de guardar la campaña.',
+    };
+  }
+
+  return {
+    details: [],
+    fieldNames: [],
+    summary: saveError instanceof Error ? saveError.message : 'No se pudo guardar la campaña.',
+  };
 };
 
 export const CampaignFormPage = ({
@@ -208,17 +329,14 @@ export const CampaignFormPage = ({
   const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
-  const [paymentQrImageUrl, setPaymentQrImageUrl] = useState<string | null>(null);
-  const [qrPreview, setQrPreview] = useState<string | null>(null);
-  const [pendingQrFile, setPendingQrFile] = useState<File | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
-  const [isUploadingQr, setIsUploadingQr] = useState(false);
   const [activeTab, setActiveTab] = useState<FormTab>('general');
   const [activeMarketingTab, setActiveMarketingTab] = useState<MarketingTab>('cover');
   const [sellerSettings, setSellerSettings] = useState<SellerSettings>(() => readSellerSettings());
   const [isLoading, setIsLoading] = useState(Boolean(raffleId));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
+  const [toast, setToast] = useState<CampaignToast | null>(null);
   const [prizes, setPrizes] = useState<readonly AdminPrize[]>([]);
   const [drawResult, setDrawResult] = useState<DrawResult | null>(null);
   const [newPrizeTitle, setNewPrizeTitle] = useState('');
@@ -238,11 +356,6 @@ export const CampaignFormPage = ({
         if (active) {
           const nextSettings = readSellerSettings(settings);
           setSellerSettings(nextSettings);
-          if (!raffleId) {
-            setPaymentQrImageUrl(
-              (current) => current ?? nextSettings.defaultPaymentQrImageUrl ?? null,
-            );
-          }
         }
       })
       .catch(() => undefined);
@@ -288,10 +401,10 @@ export const CampaignFormPage = ({
           paymentInstructions: raffle.paymentInstructions ?? '',
           drawSourceName: raffle.drawSourceName ?? '',
           drawRule: raffle.drawRule ?? '',
+          drawDate: isoToDateInput(raffle.drawDate),
           landingConfig: readLanding(raffle.landingConfig),
         });
         setCoverImageUrl(raffle.coverImageUrl ?? null);
-        setPaymentQrImageUrl(raffle.paymentQrImageUrl ?? null);
       } catch (loadError: unknown) {
         if (active) {
           setError(
@@ -380,7 +493,11 @@ export const CampaignFormPage = ({
     updateLanding({
       participationPackages: [
         ...participationPackages,
-        { label: `${nextQuantity} números`, quantity: nextQuantity },
+        {
+          label: `${nextQuantity} números`,
+          price: form.pricePerNumber * nextQuantity,
+          quantity: nextQuantity,
+        },
       ],
     });
   };
@@ -393,7 +510,7 @@ export const CampaignFormPage = ({
 
   const buildPayload = (): CreateRaffleInput | UpdateRaffleInput => ({
     title: form.title,
-    slug: form.slug,
+    slug: slugify(form.title) || form.slug,
     pricePerNumber: form.pricePerNumber,
     landingConfig: toCampaignLandingConfig(readLanding(form.landingConfig)),
     ...(form.description ? { description: form.description } : {}),
@@ -406,6 +523,7 @@ export const CampaignFormPage = ({
     ...(form.paymentInstructions ? { paymentInstructions: form.paymentInstructions } : {}),
     ...(form.drawSourceName ? { drawSourceName: form.drawSourceName } : {}),
     ...(form.drawRule ? { drawRule: form.drawRule } : {}),
+    ...(dateInputToIso(form.drawDate) !== undefined ? { drawDate: dateInputToIso(form.drawDate) as string } : {}),
   });
 
   const buildCreatePayload = (): CreateRaffleInput => ({
@@ -428,21 +546,11 @@ export const CampaignFormPage = ({
     setPendingCoverFile(null);
   };
 
-  const persistQrIfNeeded = async (targetRaffleId: string) => {
-    if (!pendingQrFile) {
-      return;
-    }
-
-    const uploadedUrl = await uploadRafflePaymentQr(credentials, targetRaffleId, pendingQrFile);
-    setPaymentQrImageUrl(uploadedUrl);
-    setQrPreview(null);
-    setPendingQrFile(null);
-  };
-
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSaving(true);
     setError('');
+    setToast(null);
 
     try {
       let targetId = raffleId;
@@ -456,12 +564,22 @@ export const CampaignFormPage = ({
 
       if (targetId) {
         await persistCoverIfNeeded(targetId);
-        await persistQrIfNeeded(targetId);
       }
 
       onDone();
     } catch (saveError: unknown) {
-      setError(saveError instanceof Error ? saveError.message : 'No se pudo guardar la campaña.');
+      const feedback = getSaveErrorFeedback(saveError);
+      setError(feedback.details.length > 0 ? feedback.details.join(' ') : feedback.summary);
+      setToast({
+        kind: TOAST_KIND.ERROR,
+        title: 'No se pudo guardar la campaña',
+        message: feedback.summary,
+        details: feedback.details,
+      });
+
+      if (feedback.fieldNames.some((fieldName) => fieldName === 'title' || fieldName === 'slug')) {
+        setActiveTab('general');
+      }
     } finally {
       setIsSaving(false);
     }
@@ -478,7 +596,6 @@ export const CampaignFormPage = ({
     try {
       await updateRaffle(credentials, raffleId, buildPayload());
       await persistCoverIfNeeded(raffleId);
-      await persistQrIfNeeded(raffleId);
       await activateRaffle(credentials, raffleId);
       onDone();
     } catch (activateError: unknown) {
@@ -514,31 +631,6 @@ export const CampaignFormPage = ({
       setCoverPreview(coverImageUrl);
     } finally {
       setIsUploadingCover(false);
-    }
-  };
-
-  const handleQrSelect = async (file: File) => {
-    const preview = URL.createObjectURL(file);
-    setQrPreview(preview);
-    setError('');
-
-    if (!raffleId) {
-      setPendingQrFile(file);
-      return;
-    }
-
-    setIsUploadingQr(true);
-
-    try {
-      const uploadedUrl = await uploadRafflePaymentQr(credentials, raffleId, file);
-      setPaymentQrImageUrl(uploadedUrl);
-      setQrPreview(uploadedUrl);
-      setPendingQrFile(null);
-    } catch (uploadError: unknown) {
-      setError(uploadError instanceof Error ? uploadError.message : 'No se pudo subir el QR.');
-      setQrPreview(paymentQrImageUrl);
-    } finally {
-      setIsUploadingQr(false);
     }
   };
 
@@ -578,22 +670,12 @@ export const CampaignFormPage = ({
   };
 
   const previewImage = coverPreview ?? coverImageUrl ?? null;
-  const previewQr = qrPreview ?? paymentQrImageUrl ?? null;
   const coverStatusNote = !raffleId
     ? pendingCoverFile
-      ? 'Imagen lista. Se subirá al servidor cuando guardes la campaña.'
-      : 'Puedes elegir la imagen ahora; se sube al guardar si la campaña es nueva.'
+      ? 'Imagen lista. Al guardar se subirá y se limpiará el fondo claro automáticamente.'
+      : 'Puedes elegir la imagen ahora; se sube al guardar y se limpia el fondo claro automáticamente.'
     : coverImageUrl
-      ? 'Imagen del premio guardada en la campaña.'
-      : undefined;
-  const qrStatusNote = !raffleId
-    ? pendingQrFile
-      ? 'QR listo. Se subirá al servidor cuando guardes la campaña.'
-      : sellerSettings.defaultPaymentQrImageUrl
-        ? 'Usando el QR por defecto de Configuración. Sube uno aquí solo si esta campaña necesita otro.'
-        : 'Puedes elegir el QR ahora; se sube al guardar si la campaña es nueva.'
-    : paymentQrImageUrl
-      ? 'QR de pago guardado en la campaña.'
+      ? 'Imagen del premio guardada. Los fondos claros se limpian automáticamente al subir.'
       : undefined;
   const previewBadge = landing.heroBadge?.trim() || 'Vista previa de portada';
   const previewTitle = landing.heroTitle?.trim() || form.title.trim() || 'Título de tu campaña';
@@ -709,9 +791,19 @@ export const CampaignFormPage = ({
             <h2>{form.title.trim() || 'Sin título'}</h2>
             <p className="muted">Configura datos, publicidad de la landing e imagen del premio.</p>
           </div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>
-            Volver
-          </button>
+          <div className="campaign-header-actions">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>
+              Volver
+            </button>
+            <button
+              type="submit"
+              form="campaign-form"
+              className="btn btn-primary btn-sm"
+              disabled={isSaving}
+            >
+              {isSaving ? 'Guardando…' : 'Guardar campaña'}
+            </button>
+          </div>
         </header>
 
         <nav className="campaign-tabs" aria-label="Secciones del formulario">
@@ -729,10 +821,34 @@ export const CampaignFormPage = ({
             ))}
         </nav>
 
-        <form className="campaign-form" onSubmit={handleSubmit}>
+        {toast ? (
+          <div className={`campaign-toast campaign-toast-${toast.kind}`} role="alert">
+            <div className="campaign-toast-head">
+              <strong>{toast.title}</strong>
+              <button
+                type="button"
+                className="campaign-toast-close"
+                aria-label="Cerrar notificación"
+                onClick={() => setToast(null)}
+              >
+                ×
+              </button>
+            </div>
+            <p>{toast.message}</p>
+            {toast.details && toast.details.length > 0 ? (
+              <ul>
+                {toast.details.map((detail) => (
+                  <li key={detail}>{detail}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+
+        <form id="campaign-form" className="campaign-form" onSubmit={handleSubmit}>
           {activeTab === 'general' ? (
             <div className="form-grid">
-              <label className="field">
+              <label className="field field-span-2">
                 <span>Título de la campaña</span>
                 <input
                   required
@@ -742,20 +858,9 @@ export const CampaignFormPage = ({
                     setForm((current) => ({
                       ...current,
                       title,
-                      slug: current.slug || slugify(title),
+                      slug: slugify(title),
                     }));
                   }}
-                />
-              </label>
-              <label className="field">
-                <span>Slug (URL pública)</span>
-                <input
-                  required
-                  pattern="^[a-z0-9]+(?:-[a-z0-9]+)*$"
-                  value={form.slug}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, slug: event.target.value }))
-                  }
                 />
               </label>
               <label className="field field-span-2">
@@ -797,6 +902,19 @@ export const CampaignFormPage = ({
                   }
                 />
               </label>
+              <label className="field">
+                <span>Fecha de finalización</span>
+                <input
+                  type="date"
+                  value={form.drawDate ?? ''}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, drawDate: event.target.value }))
+                  }
+                />
+                <small className="muted">
+                  La campaña y el contador corren hasta el final de este día.
+                </small>
+              </label>
             </div>
           ) : null}
 
@@ -834,7 +952,7 @@ export const CampaignFormPage = ({
                   <div className="marketing-tab-panel" role="tabpanel">
                     <ImageUploadField
                       label="Foto del premio"
-                      hint="Aparece grande en la portada de la landing pública."
+                      hint="Aparece grande en la portada de la landing pública. Los fondos claros se eliminan automáticamente."
                       previewSrc={previewImage}
                       emptyLabel="Aún sin foto del premio"
                       previewAlt={landing.prizeLabel ?? 'Foto del premio'}
@@ -1292,6 +1410,11 @@ export const CampaignFormPage = ({
                           {participationPackages.map((item) => (
                             <span key={item.quantity}>
                               {item.label?.trim() || `${item.quantity} números`}
+                              {' · '}
+                              {formatPreviewCurrency(
+                                getPackagePrice(item, form.pricePerNumber),
+                                form.currency ?? 'COP',
+                              )}
                             </span>
                           ))}
                         </div>
@@ -1427,6 +1550,12 @@ export const CampaignFormPage = ({
                           }))
                         }
                       />
+                      <small className="muted">
+                        Los números se muestran con {String(Math.max(form.numberMax ?? 0, 0)).length}{' '}
+                        cifras (ej.{' '}
+                        {(0).toString().padStart(String(Math.max(form.numberMax ?? 0, 0)).length, '0')}
+                        ).
+                      </small>
                     </label>
                   </>
                 ) : (
@@ -1501,6 +1630,19 @@ export const CampaignFormPage = ({
                             }
                           />
                         </label>
+                        <label className="field">
+                          <span>Precio del paquete (COP)</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={item.price ?? form.pricePerNumber * item.quantity}
+                            onChange={(event) =>
+                              updateParticipationPackage(index, {
+                                price: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"
@@ -1513,96 +1655,6 @@ export const CampaignFormPage = ({
                   </div>
                 )}
               </section>
-            </div>
-          ) : null}
-
-          {activeTab === 'payments' ? (
-            <div className="payments-layout">
-              <ImageUploadField
-                label="Código QR de pago"
-                hint="Opcional. Si lo dejas vacío, se usará el QR configurado en Configuración."
-                previewSrc={previewQr}
-                emptyLabel="Aún sin QR de pago"
-                previewAlt="Código QR de pago"
-                statusNote={qrStatusNote}
-                isUploading={isUploadingQr}
-                onFileSelect={(file) => void handleQrSelect(file)}
-                onInvalidFile={setError}
-              />
-
-              <h3 className="payments-section-title">Datos de transferencia de esta campaña</h3>
-              <p className="muted">
-                Opcional. Déjalos vacíos para usar los datos globales guardados en Configuración.
-              </p>
-              <div className="form-grid">
-                <label className="field">
-                  <span>Método de pago</span>
-                  <input
-                    value={form.paymentMethodLabel ?? ''}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, paymentMethodLabel: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Titular cuenta</span>
-                  <input
-                    value={form.paymentAccountHolder ?? ''}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        paymentAccountHolder: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Tipo de cuenta</span>
-                  <input
-                    value={form.paymentAccountType ?? ''}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, paymentAccountType: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Número de cuenta</span>
-                  <input
-                    value={form.paymentAccountNumber ?? ''}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        paymentAccountNumber: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Documento / NIT</span>
-                  <input
-                    value={form.paymentDocumentNumber ?? ''}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        paymentDocumentNumber: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field field-span-2">
-                  <span>Instrucciones de pago</span>
-                  <textarea
-                    rows={4}
-                    value={form.paymentInstructions ?? ''}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        paymentInstructions: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-              </div>
             </div>
           ) : null}
 
@@ -1735,9 +1787,6 @@ export const CampaignFormPage = ({
           ) : null}
 
           <div className="panel-actions campaign-form-actions">
-            <button type="submit" className="btn btn-primary" disabled={isSaving}>
-              {isSaving ? 'Guardando…' : 'Guardar campaña'}
-            </button>
             {raffleId && !isLiveCampaign ? (
               <button
                 type="button"

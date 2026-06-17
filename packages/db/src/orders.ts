@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import { ASSIGNMENT_MODES, ORDER_STATUSES, RAFFLE_NUMBER_STATUSES } from '@rifa/shared';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { ORDER_STATUSES, RAFFLE_NUMBER_STATUSES } from '@rifa/shared';
+import type { ParticipationPackage } from '@rifa/shared';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import { createLocalPgliteDatabase } from './client';
+import { pickRandomAvailableNumbers, formatRaffleDisplayNumber } from './raffles';
 import { auditLogs, customers, orderNumbers, orders, raffleNumbers, raffles } from './schema';
 
 interface AttachPaymentProofInput {
@@ -204,84 +206,36 @@ export const approveSellerOrder = async ({
         throw new Error('Order cannot be approved without payment proof');
       }
 
-      if (row.raffle.assignmentMode === ASSIGNMENT_MODES.customerChoice) {
-        const reservedNumbers = await transaction
-          .select()
-          .from(orderNumbers)
-          .where(eq(orderNumbers.orderId, orderId));
+      // With lazy allocation the numbers are already reserved at order time, so
+      // approving simply promotes the reserved numbers to "assigned".
+      const reservedNumbers = await transaction
+        .select()
+        .from(orderNumbers)
+        .where(eq(orderNumbers.orderId, orderId));
 
-        if (reservedNumbers.length !== row.order.numbersRequested) {
-          throw new Error('Reserved number count does not match order request');
-        }
-
-        await transaction
-          .update(raffleNumbers)
-          .set({
-            status: RAFFLE_NUMBER_STATUSES.assigned,
-            assignedToOrderId: orderId,
-            assignedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(
-            inArray(
-              raffleNumbers.id,
-              reservedNumbers.map((number) => number.raffleNumberId),
-            ),
-          );
-
-        await transaction
-          .update(orderNumbers)
-          .set({ status: RAFFLE_NUMBER_STATUSES.assigned, updatedAt: new Date() })
-          .where(eq(orderNumbers.orderId, orderId));
+      if (reservedNumbers.length !== row.order.numbersRequested) {
+        throw new Error('Reserved number count does not match order request');
       }
 
-      if (row.raffle.assignmentMode === ASSIGNMENT_MODES.random) {
-        const availableNumbers = await transaction
-          .select({
-            id: raffleNumbers.id,
-            number: raffleNumbers.number,
-            displayNumber: raffleNumbers.displayNumber,
-          })
-          .from(raffleNumbers)
-          .where(
-            and(
-              eq(raffleNumbers.raffleId, row.raffle.id),
-              eq(raffleNumbers.status, RAFFLE_NUMBER_STATUSES.available),
-            ),
-          )
-          .orderBy(asc(raffleNumbers.number))
-          .limit(row.order.numbersRequested);
-
-        if (availableNumbers.length !== row.order.numbersRequested) {
-          throw new Error('Not enough available numbers to approve order');
-        }
-
-        await transaction
-          .update(raffleNumbers)
-          .set({
-            status: RAFFLE_NUMBER_STATUSES.assigned,
-            assignedToOrderId: orderId,
-            assignedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(
-            inArray(
-              raffleNumbers.id,
-              availableNumbers.map((number) => number.id),
-            ),
-          );
-
-        await transaction.insert(orderNumbers).values(
-          availableNumbers.map((number) => ({
-            id: randomUUID(),
-            orderId,
-            raffleNumberId: number.id,
-            number: number.number,
-            displayNumber: number.displayNumber,
-            status: RAFFLE_NUMBER_STATUSES.assigned,
-          })),
+      await transaction
+        .update(raffleNumbers)
+        .set({
+          status: RAFFLE_NUMBER_STATUSES.assigned,
+          assignedToOrderId: orderId,
+          assignedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          inArray(
+            raffleNumbers.id,
+            reservedNumbers.map((number) => number.raffleNumberId),
+          ),
         );
-      }
+
+      await transaction
+        .update(orderNumbers)
+        .set({ status: RAFFLE_NUMBER_STATUSES.assigned, updatedAt: new Date() })
+        .where(eq(orderNumbers.orderId, orderId));
 
       await transaction
         .update(orders)
@@ -336,22 +290,18 @@ export const rejectSellerOrder = async ({
         .where(eq(orderNumbers.orderId, orderId));
 
       if (reservedNumbers.length > 0) {
-        await transaction
-          .update(raffleNumbers)
-          .set({
-            status: RAFFLE_NUMBER_STATUSES.available,
-            reservedByOrderId: null,
-            reservedAt: null,
-            updatedAt: new Date(),
-          })
-          .where(
-            inArray(
-              raffleNumbers.id,
-              reservedNumbers.map((number) => number.raffleNumberId),
-            ),
-          );
-
+        // Lazy allocation: freeing a number means deleting its row, so it goes
+        // back to "available" (no row = available). order_numbers references
+        // raffle_numbers with ON DELETE RESTRICT, so we MUST delete the
+        // order_numbers rows first, then the raffle_numbers rows.
         await transaction.delete(orderNumbers).where(eq(orderNumbers.orderId, orderId));
+
+        await transaction.delete(raffleNumbers).where(
+          inArray(
+            raffleNumbers.id,
+            reservedNumbers.map((number) => number.raffleNumberId),
+          ),
+        );
       }
 
       await transaction
@@ -379,6 +329,207 @@ export const rejectSellerOrder = async ({
     });
 
     return getSellerOrderDetail({ sellerId, orderId });
+  } finally {
+    await client.close();
+  }
+};
+
+interface ManualOrderProofInput {
+  readonly proofUrl: string;
+  readonly storageKey: string;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+}
+
+interface CreateManualOrderInput {
+  readonly sellerId: string;
+  readonly raffleId?: string | undefined;
+  readonly fullName: string;
+  readonly documentType?: string | undefined;
+  readonly documentNumber: string;
+  readonly email: string;
+  readonly phone: string;
+  readonly city?: string | undefined;
+  readonly numbersRequested?: number | undefined;
+  readonly selectedNumbers?: readonly number[] | undefined;
+  readonly proof?: ManualOrderProofInput | undefined;
+}
+
+const toMoneyString2 = (value: number): string => value.toFixed(2);
+
+const resolveManualAmount = (
+  pricePerNumber: string,
+  packages: readonly ParticipationPackage[] | undefined,
+  quantity: number,
+): number => {
+  const match = (packages ?? []).find(
+    (item) => Math.trunc(Number(item.quantity)) === quantity && Number(item.price) > 0,
+  );
+
+  if (match?.price !== undefined) {
+    return Number(match.price);
+  }
+
+  return Number(pricePerNumber) * quantity;
+};
+
+/**
+ * Creates an order entered manually by an admin who already verified the
+ * payment. The order is created as PAID with its numbers assigned immediately,
+ * and the uploaded proof (if any) is attached. Used for the "compra manual"
+ * admin flow. Returns the full order detail so the API can notify + broadcast.
+ */
+export const createManualSellerOrder = async (
+  input: CreateManualOrderInput,
+): Promise<OrderDetail | null> => {
+  const { client, db } = createLocalPgliteDatabase();
+
+  try {
+    const orderId = await db.transaction(async (transaction) => {
+      const raffleConditions = input.raffleId
+        ? and(eq(raffles.sellerId, input.sellerId), eq(raffles.id, input.raffleId))
+        : and(eq(raffles.sellerId, input.sellerId), eq(raffles.status, 'active'));
+
+      const [raffle] = await transaction
+        .select()
+        .from(raffles)
+        .where(raffleConditions)
+        .orderBy(desc(raffles.updatedAt))
+        .limit(1);
+
+      if (!raffle) {
+        return null;
+      }
+
+      const selectedNumbers = input.selectedNumbers ?? [];
+      const quantity = selectedNumbers.length > 0 ? selectedNumbers.length : (input.numbersRequested ?? 0);
+
+      if (quantity <= 0) {
+        throw new Error('At least one number is required');
+      }
+
+      // Lazy allocation: load taken numbers, then either validate the explicit
+      // selection or pick random numbers across the whole range.
+      const takenRows = await transaction
+        .select({ number: raffleNumbers.number })
+        .from(raffleNumbers)
+        .where(eq(raffleNumbers.raffleId, raffle.id));
+      const taken = new Set<number>(takenRows.map((row) => row.number));
+
+      let targetNumbers: readonly { id: string; number: number; displayNumber: string }[];
+
+      if (selectedNumbers.length > 0) {
+        for (const number of selectedNumbers) {
+          if (number < raffle.numberMin || number > raffle.numberMax) {
+            throw new Error('A selected number is out of range');
+          }
+          if (taken.has(number)) {
+            throw new Error('One or more selected numbers are no longer available');
+          }
+        }
+        targetNumbers = selectedNumbers.map((number) => ({
+          id: randomUUID(),
+          number,
+          displayNumber: formatRaffleDisplayNumber(number, raffle.numberPadding),
+        }));
+      } else {
+        targetNumbers = pickRandomAvailableNumbers(
+          raffle.numberMin,
+          raffle.numberMax,
+          raffle.numberPadding,
+          quantity,
+          taken,
+        );
+      }
+
+      const customerId = randomUUID();
+      const newOrderId = randomUUID();
+      const amount = resolveManualAmount(
+        raffle.pricePerNumber,
+        raffle.landingConfig?.participationPackages,
+        quantity,
+      );
+
+      await transaction.insert(customers).values({
+        id: customerId,
+        sellerId: input.sellerId,
+        fullName: input.fullName,
+        documentType: input.documentType,
+        documentNumber: input.documentNumber,
+        email: input.email,
+        phone: input.phone,
+        city: input.city,
+        acceptedTermsAt: new Date(),
+        isAdultConfirmed: true,
+      });
+
+      await transaction.insert(orders).values({
+        id: newOrderId,
+        sellerId: input.sellerId,
+        raffleId: raffle.id,
+        customerId,
+        status: ORDER_STATUSES.paid,
+        amount: toMoneyString2(amount),
+        currency: raffle.currency,
+        numbersRequested: quantity,
+        reviewedAt: new Date(),
+        adminNotes: 'Compra registrada manualmente por el administrador.',
+        ...(input.proof
+          ? {
+              paymentProofUrl: input.proof.proofUrl,
+              paymentProofStorageKey: input.proof.storageKey,
+              paymentProofMimeType: input.proof.mimeType,
+              paymentProofSizeBytes: input.proof.sizeBytes,
+              paymentProofUploadedAt: new Date(),
+            }
+          : {}),
+      });
+
+      // Lazy allocation: materialize the numbers directly as assigned.
+      await transaction.insert(raffleNumbers).values(
+        targetNumbers.map((number) => ({
+          id: number.id,
+          raffleId: raffle.id,
+          number: number.number,
+          displayNumber: number.displayNumber,
+          status: RAFFLE_NUMBER_STATUSES.assigned,
+          assignedToOrderId: newOrderId,
+          assignedAt: new Date(),
+        })),
+      );
+
+      await transaction.insert(orderNumbers).values(
+        targetNumbers.map((number) => ({
+          id: randomUUID(),
+          orderId: newOrderId,
+          raffleNumberId: number.id,
+          number: number.number,
+          displayNumber: number.displayNumber,
+          status: RAFFLE_NUMBER_STATUSES.assigned,
+        })),
+      );
+
+      await transaction.insert(auditLogs).values({
+        id: randomUUID(),
+        sellerId: input.sellerId,
+        entityType: 'order',
+        entityId: newOrderId,
+        action: 'order_approved',
+        afterData: {
+          status: ORDER_STATUSES.paid,
+          manual: true,
+          numbersAssigned: targetNumbers.length,
+        },
+      });
+
+      return newOrderId;
+    });
+
+    if (!orderId) {
+      return null;
+    }
+
+    return getSellerOrderDetail({ sellerId: input.sellerId, orderId });
   } finally {
     await client.close();
   }

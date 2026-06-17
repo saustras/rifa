@@ -1,4 +1,4 @@
-import { useId, type ChangeEvent } from 'react';
+import { useEffect, useId, useState, type ChangeEvent } from 'react';
 
 interface ImageUploadFieldProps {
   readonly label: string;
@@ -12,6 +12,24 @@ interface ImageUploadFieldProps {
   readonly onInvalidFile?: (message: string) => void;
 }
 
+const ACCEPTED_TYPES = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+];
+
+const isAcceptedImage = (file: File): boolean => {
+  // Some phones report an empty type for HEIC; allow by extension as a fallback.
+  if (file.type && ACCEPTED_TYPES.includes(file.type)) {
+    return true;
+  }
+
+  return /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name);
+};
+
 export const ImageUploadField = ({
   label,
   hint,
@@ -24,6 +42,16 @@ export const ImageUploadField = ({
   onInvalidFile,
 }: ImageUploadFieldProps) => {
   const inputId = useId();
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+
+  // Release the object URL when it changes or the component unmounts.
+  useEffect(() => {
+    return () => {
+      if (localPreview) {
+        URL.revokeObjectURL(localPreview);
+      }
+    };
+  }, [localPreview]);
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -32,15 +60,25 @@ export const ImageUploadField = ({
       return;
     }
 
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      onInvalidFile?.('Usa una imagen JPG, PNG o WebP.');
+    if (!isAcceptedImage(file)) {
+      onInvalidFile?.('Usa una imagen JPG, PNG, WebP o HEIC.');
       event.target.value = '';
       return;
     }
 
+    // Show the selected image immediately, before the upload round-trip.
+    setLocalPreview((current) => {
+      if (current) {
+        URL.revokeObjectURL(current);
+      }
+      return URL.createObjectURL(file);
+    });
+
     onFileSelect(file);
     event.target.value = '';
   };
+
+  const effectivePreview = localPreview ?? previewSrc;
 
   return (
     <div className="asset-upload-card">
@@ -51,8 +89,8 @@ export const ImageUploadField = ({
 
       <div className="asset-upload-body">
         <div className="asset-upload-preview">
-          {previewSrc ? (
-            <img className="cover-preview" src={previewSrc} alt={previewAlt} />
+          {effectivePreview ? (
+            <img className="cover-preview" src={effectivePreview} alt={previewAlt} />
           ) : (
             <div className="cover-preview cover-preview-empty">
               <span>{emptyLabel}</span>
@@ -64,7 +102,7 @@ export const ImageUploadField = ({
           <input
             id={inputId}
             type="file"
-            accept="image/jpeg,image/png,image/webp"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
             disabled={isUploading}
             onChange={handleChange}
           />
@@ -74,7 +112,7 @@ export const ImageUploadField = ({
           <span className="cover-dropzone-title">
             {isUploading ? 'Subiendo imagen…' : 'Haz clic para subir imagen'}
           </span>
-          <small className="muted">JPG, PNG o WebP · máx. 5 MB recomendado</small>
+          <small className="muted">JPG, PNG, WebP o HEIC · se optimiza automáticamente</small>
         </label>
       </div>
 

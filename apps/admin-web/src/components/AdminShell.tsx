@@ -8,6 +8,7 @@ const NAV_ITEMS: ReadonlyArray<{ id: AdminView; label: string; icon: string }> =
   { id: 'campaigns', label: 'Campañas', icon: '◫' },
   { id: 'orders', label: 'Órdenes', icon: '◈' },
   { id: 'participants', label: 'Participantes', icon: '◎' },
+  { id: 'winners', label: 'Ganadores', icon: '★' },
   { id: 'numbers', label: 'Números', icon: '#' },
   { id: 'settings', label: 'Configuración', icon: '⚙' },
 ];
@@ -41,6 +42,7 @@ export const AdminShell = ({
     campaigns: 'Campañas',
     orders: 'Órdenes y pagos',
     participants: 'Participantes',
+    winners: 'Ganadores',
     numbers: 'Números',
     settings: 'Configuración',
   };
@@ -50,6 +52,7 @@ export const AdminShell = ({
     campaigns: 'Gestiona tus rifas activas y borradores.',
     orders: 'Revisa comprobantes, aprueba o rechaza compras.',
     participants: 'Clientes que compraron participaciones en tus campañas.',
+    winners: 'Publica ganadores y fotos de entregas en la landing.',
     numbers: 'Estado del inventario de números por campaña.',
     settings: 'Credenciales de acceso y estado del sistema.',
   };

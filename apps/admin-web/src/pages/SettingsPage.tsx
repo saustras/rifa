@@ -7,9 +7,24 @@ import {
   fetchSellerSettings,
   updateSellerSettings,
   uploadDefaultPaymentQr,
+  uploadPaymentMethodQr,
 } from '../api';
 import { API_BASE_URL, PUBLIC_WEB_URL } from '../config';
-import type { AdminCredentials, AdminSession, SellerSettings } from '../types';
+import type { AdminCredentials, AdminSession, PaymentMethod, SellerSettings } from '../types';
+
+const createEmptyPaymentMethod = (): PaymentMethod => ({
+  id:
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `method-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  label: '',
+  accountHolder: '',
+  accountType: '',
+  accountNumber: '',
+  documentNumber: '',
+  instructions: '',
+  qrImageUrl: '',
+});
 
 interface SettingsPageProps {
   readonly credentials: AdminCredentials;
@@ -32,8 +47,51 @@ export const SettingsPage = ({ credentials, session, onLogout }: SettingsPagePro
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingQr, setIsUploadingQr] = useState(false);
+  const [uploadingMethodId, setUploadingMethodId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+
+  const paymentMethods = settings.paymentMethods ?? [];
+
+  const setPaymentMethods = (methods: readonly PaymentMethod[]) => {
+    setSettings((current) => ({ ...current, paymentMethods: methods }));
+  };
+
+  const handleAddPaymentMethod = () => {
+    setPaymentMethods([...paymentMethods, createEmptyPaymentMethod()]);
+  };
+
+  const handleRemovePaymentMethod = (id: string) => {
+    setPaymentMethods(paymentMethods.filter((method) => method.id !== id));
+  };
+
+  const handleUpdatePaymentMethod = (
+    id: string,
+    field: keyof PaymentMethod,
+    value: string,
+  ) => {
+    setPaymentMethods(
+      paymentMethods.map((method) =>
+        method.id === id ? { ...method, [field]: value } : method,
+      ),
+    );
+  };
+
+  const handleMethodQrSelect = async (id: string, file: File) => {
+    setUploadingMethodId(id);
+    setError('');
+    setMessage('');
+
+    try {
+      const qrImageUrl = await uploadPaymentMethodQr(credentials, file);
+      handleUpdatePaymentMethod(id, 'qrImageUrl', qrImageUrl);
+      setMessage('QR del método actualizado. Recuerda guardar la configuración.');
+    } catch (uploadError: unknown) {
+      setError(uploadError instanceof Error ? uploadError.message : 'No se pudo subir el QR.');
+    } finally {
+      setUploadingMethodId(null);
+    }
+  };
 
   useEffect(() => {
     void fetchDbHealth()
@@ -81,7 +139,12 @@ export const SettingsPage = ({ credentials, session, onLogout }: SettingsPagePro
     setMessage('');
 
     try {
-      const saved = await updateSellerSettings(credentials, settings);
+      // Drop incomplete payment methods (a label is required by the API).
+      const cleanedMethods = (settings.paymentMethods ?? []).filter(
+        (method) => method.label.trim().length > 0,
+      );
+      const payload: SellerSettings = { ...settings, paymentMethods: cleanedMethods };
+      const saved = await updateSellerSettings(credentials, payload);
       setSettings(readSettings(saved));
       setMessage('Configuración guardada. Las campañas usarán estos datos por defecto.');
     } catch (saveError: unknown) {
@@ -221,6 +284,14 @@ export const SettingsPage = ({ credentials, session, onLogout }: SettingsPagePro
               onChange={(event) => updateField('youtubeUrl', event.target.value)}
             />
           </label>
+          <label className="field">
+            <span>WhatsApp URL</span>
+            <input
+              placeholder="https://wa.me/57300..."
+              value={settings.whatsappUrl ?? ''}
+              onChange={(event) => updateField('whatsappUrl', event.target.value)}
+            />
+          </label>
           <label className="field field-span-2">
             <span>Texto del footer</span>
             <textarea
@@ -300,6 +371,116 @@ export const SettingsPage = ({ credentials, session, onLogout }: SettingsPagePro
               onChange={(event) => updateField('defaultPaymentInstructions', event.target.value)}
             />
           </label>
+        </div>
+      </article>
+
+      <article className="panel">
+        <div className="settings-panel-head">
+          <div>
+            <h2>Métodos de pago</h2>
+            <p className="muted">
+              Agrega varias cuentas (Nequi, Bancolombia, Daviplata…). Todas se muestran al cliente
+              en el checkout y este sube un solo comprobante.
+            </p>
+          </div>
+          <button type="button" className="btn btn-ghost" onClick={handleAddPaymentMethod}>
+            + Agregar método
+          </button>
+        </div>
+
+        {paymentMethods.length === 0 ? (
+          <p className="muted">
+            Aún no agregaste métodos. Si no agregas ninguno, se usará la cuenta de “Pagos por
+            defecto”.
+          </p>
+        ) : null}
+
+        <div className="payment-methods-list">
+          {paymentMethods.map((method, index) => (
+            <div className="payment-method-card panel" key={method.id}>
+              <div className="settings-panel-head">
+                <h3>Método {index + 1}</h3>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => handleRemovePaymentMethod(method.id)}
+                >
+                  Eliminar
+                </button>
+              </div>
+
+              <ImageUploadField
+                label="QR del método (opcional)"
+                hint="QR para escanear y pagar con este método."
+                previewSrc={method.qrImageUrl || null}
+                emptyLabel="Sin QR"
+                previewAlt={`QR de ${method.label || 'método de pago'}`}
+                isUploading={uploadingMethodId === method.id}
+                onFileSelect={(file) => void handleMethodQrSelect(method.id, file)}
+                onInvalidFile={setError}
+              />
+
+              <div className="form-grid settings-payment-grid">
+                <label className="field">
+                  <span>Nombre del método *</span>
+                  <input
+                    placeholder="Nequi, Bancolombia…"
+                    value={method.label}
+                    onChange={(event) =>
+                      handleUpdatePaymentMethod(method.id, 'label', event.target.value)
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Titular cuenta</span>
+                  <input
+                    value={method.accountHolder ?? ''}
+                    onChange={(event) =>
+                      handleUpdatePaymentMethod(method.id, 'accountHolder', event.target.value)
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Tipo de cuenta</span>
+                  <input
+                    placeholder="Ahorros, corriente, Nequi…"
+                    value={method.accountType ?? ''}
+                    onChange={(event) =>
+                      handleUpdatePaymentMethod(method.id, 'accountType', event.target.value)
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Número de cuenta</span>
+                  <input
+                    value={method.accountNumber ?? ''}
+                    onChange={(event) =>
+                      handleUpdatePaymentMethod(method.id, 'accountNumber', event.target.value)
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Documento / NIT</span>
+                  <input
+                    value={method.documentNumber ?? ''}
+                    onChange={(event) =>
+                      handleUpdatePaymentMethod(method.id, 'documentNumber', event.target.value)
+                    }
+                  />
+                </label>
+                <label className="field field-span-2">
+                  <span>Instrucciones</span>
+                  <textarea
+                    rows={2}
+                    value={method.instructions ?? ''}
+                    onChange={(event) =>
+                      handleUpdatePaymentMethod(method.id, 'instructions', event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+            </div>
+          ))}
         </div>
       </article>
 

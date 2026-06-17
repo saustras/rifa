@@ -1,6 +1,18 @@
 export interface ParticipationPackage {
   readonly label?: string | undefined;
   readonly quantity: number;
+  readonly price?: number | undefined;
+}
+
+export interface PaymentMethod {
+  readonly id: string;
+  readonly label: string;
+  readonly accountHolder?: string | undefined;
+  readonly accountType?: string | undefined;
+  readonly accountNumber?: string | undefined;
+  readonly documentNumber?: string | undefined;
+  readonly instructions?: string | undefined;
+  readonly qrImageUrl?: string | undefined;
 }
 
 export interface RaffleLandingConfig {
@@ -67,6 +79,7 @@ export interface RaffleLandingConfig {
   readonly instagramUrl?: string | undefined;
   readonly facebookUrl?: string | undefined;
   readonly youtubeUrl?: string | undefined;
+  readonly whatsappUrl?: string | undefined;
   readonly copyrightText?: string | undefined;
 }
 
@@ -83,6 +96,7 @@ export interface SellerSettings {
   readonly instagramUrl?: string | undefined;
   readonly facebookUrl?: string | undefined;
   readonly youtubeUrl?: string | undefined;
+  readonly whatsappUrl?: string | undefined;
   readonly footerBrandText?: string | undefined;
   readonly copyrightText?: string | undefined;
   readonly defaultPaymentMethodLabel?: string | undefined;
@@ -92,6 +106,7 @@ export interface SellerSettings {
   readonly defaultPaymentDocumentNumber?: string | undefined;
   readonly defaultPaymentInstructions?: string | undefined;
   readonly defaultPaymentQrImageUrl?: string | undefined;
+  readonly paymentMethods?: readonly PaymentMethod[] | undefined;
 }
 
 export const DEFAULT_LANDING_CONFIG: RaffleLandingConfig = {
@@ -160,6 +175,7 @@ export const DEFAULT_LANDING_CONFIG: RaffleLandingConfig = {
   instagramUrl: '',
   facebookUrl: '',
   youtubeUrl: '',
+  whatsappUrl: '',
   copyrightText: 'Todos los derechos reservados.',
 };
 
@@ -176,6 +192,7 @@ export const DEFAULT_SELLER_SETTINGS: SellerSettings = {
   instagramUrl: '',
   facebookUrl: '',
   youtubeUrl: '',
+  whatsappUrl: '',
   footerBrandText: 'Campañas promocionales transparentes, seguras y con resultados verificados.',
   copyrightText: 'Todos los derechos reservados.',
   defaultPaymentMethodLabel: 'Nequi / Transferencia',
@@ -185,4 +202,5 @@ export const DEFAULT_SELLER_SETTINGS: SellerSettings = {
   defaultPaymentDocumentNumber: '',
   defaultPaymentInstructions: '',
   defaultPaymentQrImageUrl: '',
+  paymentMethods: [],
 };

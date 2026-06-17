@@ -1,60 +1,97 @@
 import { randomUUID } from 'node:crypto';
 
-import { AUDIT_ACTIONS, ORDER_STATUSES, RAFFLE_NUMBER_STATUSES } from '@rifa/shared';
+import { AUDIT_ACTIONS, RAFFLE_NUMBER_STATUSES } from '@rifa/shared';
 import { and, eq } from 'drizzle-orm';
 
 import { createLocalPgliteDatabase } from './client';
-import { auditLogs, orderNumbers, orders, raffleNumbers, raffles } from './schema';
+import { auditLogs, orderNumbers, raffleNumbers, raffles } from './schema';
+import { formatRaffleDisplayNumber } from './raffles';
 
 interface NumberActionInput {
   readonly sellerId: string;
   readonly raffleNumberId: string;
 }
 
-export const blockSellerRaffleNumber = async ({
+interface BlockByValueInput {
+  readonly sellerId: string;
+  readonly raffleId: string;
+  readonly number: number;
+}
+
+/**
+ * Blocks a specific number by value. With lazy allocation, an available number
+ * has no row, so blocking it means inserting a new row with status "blocked".
+ * Returns false if the number is out of range or already taken.
+ */
+export const blockSellerRaffleNumberByValue = async ({
   sellerId,
-  raffleNumberId,
-}: NumberActionInput): Promise<boolean> => {
+  raffleId,
+  number,
+}: BlockByValueInput): Promise<boolean> => {
   const { client, db } = createLocalPgliteDatabase();
 
   try {
-    const [row] = await db
-      .select({
-        number: raffleNumbers,
-        raffle: raffles,
-      })
-      .from(raffleNumbers)
-      .innerJoin(raffles, eq(raffleNumbers.raffleId, raffles.id))
-      .where(and(eq(raffleNumbers.id, raffleNumberId), eq(raffles.sellerId, sellerId)))
-      .limit(1);
+    return await db.transaction(async (transaction) => {
+      const [raffle] = await transaction
+        .select({
+          id: raffles.id,
+          numberMin: raffles.numberMin,
+          numberMax: raffles.numberMax,
+          numberPadding: raffles.numberPadding,
+        })
+        .from(raffles)
+        .where(and(eq(raffles.id, raffleId), eq(raffles.sellerId, sellerId)))
+        .limit(1);
 
-    if (!row || row.number.status !== RAFFLE_NUMBER_STATUSES.available) {
-      return false;
-    }
+      if (!raffle) {
+        return false;
+      }
 
-    await db
-      .update(raffleNumbers)
-      .set({
+      if (!Number.isInteger(number) || number < raffle.numberMin || number > raffle.numberMax) {
+        return false;
+      }
+
+      const [existing] = await transaction
+        .select({ id: raffleNumbers.id })
+        .from(raffleNumbers)
+        .where(and(eq(raffleNumbers.raffleId, raffleId), eq(raffleNumbers.number, number)))
+        .limit(1);
+
+      if (existing) {
+        return false;
+      }
+
+      const newId = randomUUID();
+
+      await transaction.insert(raffleNumbers).values({
+        id: newId,
+        raffleId,
+        number,
+        displayNumber: formatRaffleDisplayNumber(number, raffle.numberPadding),
         status: RAFFLE_NUMBER_STATUSES.blocked,
-        updatedAt: new Date(),
-      })
-      .where(eq(raffleNumbers.id, raffleNumberId));
+      });
 
-    await db.insert(auditLogs).values({
-      id: randomUUID(),
-      sellerId,
-      entityType: 'raffle_number',
-      entityId: raffleNumberId,
-      action: AUDIT_ACTIONS.numberBlocked,
-      afterData: { number: row.number.number },
+      await transaction.insert(auditLogs).values({
+        id: randomUUID(),
+        sellerId,
+        entityType: 'raffle_number',
+        entityId: newId,
+        action: AUDIT_ACTIONS.numberBlocked,
+        afterData: { number },
+      });
+
+      return true;
     });
-
-    return true;
   } finally {
     await client.close();
   }
 };
 
+/**
+ * Releases a number by deleting its row (lazy model: no row = available).
+ * Works for blocked and reserved numbers. Assigned (paid) numbers are NOT
+ * released here — handle those by rejecting the order instead.
+ */
 export const releaseSellerRaffleNumber = async ({
   sellerId,
   raffleNumberId,
@@ -65,7 +102,8 @@ export const releaseSellerRaffleNumber = async ({
     return await db.transaction(async (transaction) => {
       const [row] = await transaction
         .select({
-          number: raffleNumbers,
+          id: raffleNumbers.id,
+          status: raffleNumbers.status,
         })
         .from(raffleNumbers)
         .innerJoin(raffles, eq(raffleNumbers.raffleId, raffles.id))
@@ -76,45 +114,26 @@ export const releaseSellerRaffleNumber = async ({
         return false;
       }
 
-      if (row.number.status === RAFFLE_NUMBER_STATUSES.blocked) {
-        await transaction
-          .update(raffleNumbers)
-          .set({
-            status: RAFFLE_NUMBER_STATUSES.available,
-            updatedAt: new Date(),
-          })
-          .where(eq(raffleNumbers.id, raffleNumberId));
-
-        return true;
+      if (
+        row.status !== RAFFLE_NUMBER_STATUSES.blocked &&
+        row.status !== RAFFLE_NUMBER_STATUSES.reserved
+      ) {
+        return false;
       }
 
-      if (row.number.status === RAFFLE_NUMBER_STATUSES.reserved && row.number.reservedByOrderId) {
-        const [order] = await transaction
-          .select({ id: orders.id, status: orders.status })
-          .from(orders)
-          .where(eq(orders.id, row.number.reservedByOrderId))
-          .limit(1);
+      await transaction.delete(orderNumbers).where(eq(orderNumbers.raffleNumberId, raffleNumberId));
+      await transaction.delete(raffleNumbers).where(eq(raffleNumbers.id, raffleNumberId));
 
-        if (!order || order.status !== ORDER_STATUSES.pendingReview) {
-          return false;
-        }
+      await transaction.insert(auditLogs).values({
+        id: randomUUID(),
+        sellerId,
+        entityType: 'raffle_number',
+        entityId: raffleNumberId,
+        action: AUDIT_ACTIONS.numberReleased,
+        afterData: { released: true },
+      });
 
-        await transaction
-          .update(raffleNumbers)
-          .set({
-            status: RAFFLE_NUMBER_STATUSES.available,
-            reservedByOrderId: null,
-            reservedAt: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(raffleNumbers.id, raffleNumberId));
-
-        await transaction.delete(orderNumbers).where(eq(orderNumbers.orderId, order.id));
-
-        return true;
-      }
-
-      return false;
+      return true;
     });
   } finally {
     await client.close();

@@ -1,6 +1,28 @@
 import type { RaffleLandingConfig } from '@rifa/shared';
 
-export type { ParticipationPackage, RaffleLandingConfig, SellerSettings } from '@rifa/shared';
+export type {
+  ParticipationPackage,
+  PaymentMethod,
+  RaffleLandingConfig,
+  SellerSettings,
+} from '@rifa/shared';
+
+export interface CreateManualOrderInput {
+  readonly raffleId?: string;
+  readonly fullName: string;
+  readonly documentType?: string;
+  readonly documentNumber: string;
+  readonly email: string;
+  readonly phone: string;
+  readonly city?: string;
+  readonly numbersRequested?: number;
+  readonly selectedNumbers?: readonly number[];
+  readonly proof?: {
+    readonly fileName: string;
+    readonly mimeType: string;
+    readonly dataBase64: string;
+  };
+}
 
 export const ORDER_STATUS = {
   all: 'all',
@@ -26,6 +48,7 @@ export type AdminView =
   | 'campaign-form'
   | 'orders'
   | 'participants'
+  | 'winners'
   | 'numbers'
   | 'settings';
 
@@ -169,6 +192,7 @@ export interface CreateRaffleInput {
   readonly paymentInstructions?: string;
   readonly drawSourceName?: string;
   readonly drawRule?: string;
+  readonly drawDate?: string;
 }
 
 export interface UpdateRaffleInput {
@@ -187,6 +211,7 @@ export interface UpdateRaffleInput {
   readonly paymentInstructions?: string;
   readonly drawSourceName?: string;
   readonly drawRule?: string;
+  readonly drawDate?: string;
 }
 
 export interface AdminCustomer {
@@ -200,6 +225,25 @@ export interface AdminCustomer {
   readonly ordersCount: number;
 }
 
+export interface CustomerDetailOrder {
+  readonly orderId: string;
+  readonly raffleTitle: string;
+  readonly raffleSlug: string;
+  readonly orderStatus: string;
+  readonly amount: string;
+  readonly currency: string;
+  readonly numbersRequested: number;
+  readonly createdAt: string;
+  readonly numbers: readonly string[];
+}
+
+export interface AdminCustomerDetail {
+  readonly customer: AdminCustomer;
+  readonly orders: readonly CustomerDetailOrder[];
+  readonly totalAmount: string;
+  readonly totalOrders: number;
+}
+
 export interface AdminRaffleNumber {
   readonly id: string;
   readonly number: number;
@@ -207,6 +251,16 @@ export interface AdminRaffleNumber {
   readonly status: string;
   readonly reservedByOrderId: string | null;
   readonly assignedToOrderId: string | null;
+  readonly orderId: string | null;
+  readonly orderAmount: string | null;
+  readonly orderCurrency: string | null;
+  readonly orderCreatedAt: string | null;
+  readonly orderStatus: string | null;
+  readonly customerName: string | null;
+  readonly customerEmail: string | null;
+  readonly customerPhone: string | null;
+  readonly customerDocument: string | null;
+  readonly customerCity: string | null;
 }
 
 export interface OrdersMetrics {
@@ -237,4 +291,28 @@ export interface AdminPrize {
   readonly description: string | null;
   readonly commercialValue: string | null;
   readonly position: number;
+}
+
+export interface AdminWinner {
+  readonly id: string;
+  readonly raffleId: string;
+  readonly raffleTitle: string;
+  readonly winningNumber: number;
+  readonly externalSource: string;
+  readonly registeredAt: string;
+  readonly winnerDisplayName: string | null;
+  readonly isPublicWinner: boolean;
+  readonly winnerPhotoUrl: string | null;
+  readonly winnerComment: string | null;
+  readonly displayOrder: number;
+}
+
+export interface DeliveryGalleryImage {
+  readonly id: string;
+  readonly imageUrl: string;
+  readonly title: string | null;
+  readonly caption: string | null;
+  readonly isPublic: boolean;
+  readonly displayOrder: number;
+  readonly createdAt: string;
 }

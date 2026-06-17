@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
-import {
-  ASSIGNMENT_MODES,
-  ORDER_STATUSES,
-  RAFFLE_NUMBER_STATUSES,
-  RAFFLE_STATUSES,
+import { ORDER_STATUSES, RAFFLE_NUMBER_STATUSES, RAFFLE_STATUSES } from '@rifa/shared';
+import type {
+  AssignmentMode,
+  ParticipationPackage,
+  RaffleLandingConfig,
+  RaffleStatus,
 } from '@rifa/shared';
-import type { AssignmentMode, RaffleLandingConfig, RaffleStatus } from '@rifa/shared';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 
 import { createLocalPgliteDatabase } from './client';
 import { auditLogs, customers, orderNumbers, orders, raffleNumbers, raffles } from './schema';
@@ -170,17 +170,167 @@ const toNullableDate = (value: string | undefined): Date | null => {
 const displayNumber = (value: number, padding: number): string =>
   value.toString().padStart(padding, '0');
 
-const createNumberRows = (raffleId: string, min: number, max: number, padding: number) =>
-  Array.from({ length: max - min + 1 }, (_, index) => {
-    const number = min + index;
+const normalizeParticipationPackages = (
+  packages: readonly ParticipationPackage[] | undefined,
+): readonly ParticipationPackage[] => {
+  const seenQuantities = new Set<number>();
 
-    return {
-      id: randomUUID(),
-      raffleId,
-      number,
-      displayNumber: displayNumber(number, padding),
-    };
-  });
+  return (packages ?? [])
+    .map((item) => ({
+      label: item.label?.trim(),
+      quantity: Math.trunc(Number(item.quantity)),
+      price: item.price === undefined ? undefined : Number(item.price),
+    }))
+    .filter((item) => Number.isFinite(item.quantity) && item.quantity >= 1 && item.quantity <= 100)
+    .filter((item) => {
+      if (seenQuantities.has(item.quantity)) {
+        return false;
+      }
+
+      seenQuantities.add(item.quantity);
+      return true;
+    })
+    .map((item) => ({
+      quantity: item.quantity,
+      ...(item.label ? { label: item.label } : {}),
+      ...(Number.isFinite(item.price) && Number(item.price) > 0 ? { price: Number(item.price) } : {}),
+    }));
+};
+
+const getOrderAmount = (raffle: RaffleRow, numbersRequested: number): number => {
+  const packages = normalizeParticipationPackages(raffle.landingConfig?.participationPackages);
+  const packageMatch = packages.find((item) => item.quantity === numbersRequested);
+
+  if (packages.length > 0 && !packageMatch) {
+    throw new Error('Selected package is not available');
+  }
+
+  if (packageMatch?.price !== undefined) {
+    return packageMatch.price;
+  }
+
+  return Number(raffle.pricePerNumber) * numbersRequested;
+};
+
+export interface AllocatedNumber {
+  readonly id: string;
+  readonly number: number;
+  readonly displayNumber: string;
+}
+
+export const formatRaffleDisplayNumber = (value: number, padding: number): string =>
+  displayNumber(value, padding);
+
+// Picks `quantity` distinct numbers at random across the whole [min, max]
+// range, skipping any number already taken. Uses rejection sampling (fast when
+// the raffle is far from full) with a deterministic scan fallback for raffles
+// that are nearly sold out. `takenNumbers` must contain every number that is
+// currently reserved/assigned/blocked.
+export const pickRandomAvailableNumbers = (
+  min: number,
+  max: number,
+  padding: number,
+  quantity: number,
+  takenNumbers: ReadonlySet<number>,
+): readonly AllocatedNumber[] => {
+  const total = max - min + 1;
+  const available = total - takenNumbers.size;
+
+  if (available < quantity) {
+    throw new Error('Not enough available numbers');
+  }
+
+  const chosen = new Set<number>();
+  const maxAttempts = quantity * 40 + 2_000;
+  let attempts = 0;
+
+  while (chosen.size < quantity && attempts < maxAttempts) {
+    const candidate = min + Math.floor(Math.random() * total);
+    if (!takenNumbers.has(candidate) && !chosen.has(candidate)) {
+      chosen.add(candidate);
+    }
+    attempts += 1;
+  }
+
+  if (chosen.size < quantity) {
+    // Fallback for nearly-full raffles: scan the range for free numbers.
+    for (let number = min; number <= max && chosen.size < quantity; number += 1) {
+      if (!takenNumbers.has(number) && !chosen.has(number)) {
+        chosen.add(number);
+      }
+    }
+  }
+
+  return [...chosen].map((number) => ({
+    id: randomUUID(),
+    number,
+    displayNumber: displayNumber(number, padding),
+  }));
+};
+
+/**
+ * Releases number reservations that have expired. A reservation expires when an
+ * order is still pending review, has NO payment proof uploaded, and was created
+ * longer ago than the raffle's reservationTtlMinutes. The reserved numbers are
+ * freed (their rows are deleted, returning to "available") and the order is
+ * marked as expired. Orders that already uploaded a proof are NEVER expired —
+ * they keep their numbers until the admin approves or rejects them.
+ */
+export const releaseExpiredReservations = async (raffleId: string): Promise<number> => {
+  const { client, db } = createLocalPgliteDatabase();
+
+  try {
+    const [raffle] = await db
+      .select({ id: raffles.id, ttl: raffles.reservationTtlMinutes })
+      .from(raffles)
+      .where(eq(raffles.id, raffleId))
+      .limit(1);
+
+    if (!raffle) {
+      return 0;
+    }
+
+    const cutoff = new Date(Date.now() - raffle.ttl * 60_000);
+
+    return await db.transaction(async (transaction) => {
+      const expiredOrders = await transaction
+        .select({ id: orders.id })
+        .from(orders)
+        .where(
+          and(
+            eq(orders.raffleId, raffleId),
+            eq(orders.status, ORDER_STATUSES.pendingReview),
+            isNull(orders.paymentProofStorageKey),
+            lt(orders.createdAt, cutoff),
+          ),
+        );
+
+      if (expiredOrders.length === 0) {
+        return 0;
+      }
+
+      const expiredIds = expiredOrders.map((order) => order.id);
+
+      await transaction.delete(orderNumbers).where(inArray(orderNumbers.orderId, expiredIds));
+      await transaction
+        .delete(raffleNumbers)
+        .where(
+          and(
+            eq(raffleNumbers.raffleId, raffleId),
+            inArray(raffleNumbers.reservedByOrderId, expiredIds),
+          ),
+        );
+      await transaction
+        .update(orders)
+        .set({ status: ORDER_STATUSES.expired, updatedAt: new Date() })
+        .where(inArray(orders.id, expiredIds));
+
+      return expiredIds.length;
+    });
+  } finally {
+    await client.close();
+  }
+};
 
 export const listSellerRaffles = async ({
   sellerId,
@@ -217,12 +367,19 @@ export const getSellerRaffleById = async ({
   }
 };
 
+// Padding is derived from the highest number's digit count so the displayed
+// numbers always have a consistent width (e.g. a raffle of 0..9999 renders
+// "0099" for number 99). The manual padding acts only as a minimum floor.
+const derivePadding = (numberMax: number, requestedPadding: number): number =>
+  Math.max(requestedPadding || 1, String(Math.max(Math.trunc(numberMax), 0)).length);
+
 export const createSellerRaffle = async ({
   sellerId,
   payload,
 }: CreateSellerRaffleInput): Promise<RaffleRow> => {
   const { client, db } = createLocalPgliteDatabase();
   const raffleId = randomUUID();
+  const numberPadding = derivePadding(payload.numberMax, payload.numberPadding);
 
   try {
     const [created] = await db.transaction(async (transaction) => {
@@ -241,7 +398,7 @@ export const createSellerRaffle = async ({
           currency: payload.currency,
           numberMin: payload.numberMin,
           numberMax: payload.numberMax,
-          numberPadding: payload.numberPadding,
+          numberPadding,
           assignmentMode: payload.assignmentMode,
           reservationTtlMinutes: payload.reservationTtlMinutes,
           drawSourceName: payload.drawSourceName,
@@ -258,11 +415,10 @@ export const createSellerRaffle = async ({
         })
         .returning();
 
-      await transaction
-        .insert(raffleNumbers)
-        .values(
-          createNumberRows(raffleId, payload.numberMin, payload.numberMax, payload.numberPadding),
-        );
+      // Lazy allocation: we do NOT pre-create a row per number. Numbers only
+      // become rows in raffle_numbers when they are actually taken (reserved,
+      // assigned or blocked). Availability is computed as (range - taken).
+      // This makes raffles of up to 1,000,000 numbers cheap to create.
 
       await transaction.insert(auditLogs).values({
         id: randomUUID(),
@@ -432,15 +588,20 @@ export const getPublicCurrentActiveRaffle = async (): Promise<RaffleRow | null> 
 export const listPublicRaffleNumbersBySlug = async (
   slug: string,
 ): Promise<readonly PublicRaffleNumberRow[] | null> => {
+  const raffle = await getPublicActiveRaffleBySlug(slug);
+
+  if (!raffle) {
+    return null;
+  }
+
+  // Free any expired reservations so availability is up to date. With lazy
+  // allocation only taken numbers exist as rows, so this returns just the
+  // reserved/assigned/blocked numbers.
+  await releaseExpiredReservations(raffle.id);
+
   const { client, db } = createLocalPgliteDatabase();
 
   try {
-    const raffle = await getPublicActiveRaffleBySlug(slug);
-
-    if (!raffle) {
-      return null;
-    }
-
     return await db
       .select({
         id: raffleNumbers.id,
@@ -456,10 +617,59 @@ export const listPublicRaffleNumbersBySlug = async (
   }
 };
 
+export interface PublicRaffleStats {
+  readonly total: number;
+  readonly assigned: number;
+  readonly reserved: number;
+  readonly blocked: number;
+  readonly available: number;
+}
+
+export const getPublicRaffleStatsBySlug = async (
+  slug: string,
+): Promise<PublicRaffleStats | null> => {
+  const raffle = await getPublicActiveRaffleBySlug(slug);
+
+  if (!raffle) {
+    return null;
+  }
+
+  await releaseExpiredReservations(raffle.id);
+
+  const { client, db } = createLocalPgliteDatabase();
+
+  try {
+    const rows = await db
+      .select({ status: raffleNumbers.status })
+      .from(raffleNumbers)
+      .where(eq(raffleNumbers.raffleId, raffle.id));
+
+    const total = raffle.numberMax - raffle.numberMin + 1;
+    const assigned = rows.filter((row) => row.status === RAFFLE_NUMBER_STATUSES.assigned).length;
+    const reserved = rows.filter((row) => row.status === RAFFLE_NUMBER_STATUSES.reserved).length;
+    const blocked = rows.filter((row) => row.status === RAFFLE_NUMBER_STATUSES.blocked).length;
+    const available = Math.max(0, total - rows.length);
+
+    return { total, assigned, reserved, blocked, available };
+  } finally {
+    await client.close();
+  }
+};
+
 export const createPublicOrderForRaffle = async ({
   slug,
   payload,
 }: CreatePublicOrderInput): Promise<PublicOrderResult | null> => {
+  // Get the raffle id first so we can release expired reservations before
+  // computing availability.
+  const preRaffle = await getPublicActiveRaffleBySlug(slug);
+
+  if (!preRaffle) {
+    return null;
+  }
+
+  await releaseExpiredReservations(preRaffle.id);
+
   const { client, db } = createLocalPgliteDatabase();
 
   try {
@@ -476,28 +686,49 @@ export const createPublicOrderForRaffle = async ({
 
       const selectedNumbers = payload.selectedNumbers ?? [];
       const numbersRequested =
-        raffle.assignmentMode === ASSIGNMENT_MODES.customerChoice
-          ? selectedNumbers.length
-          : (payload.numbersRequested ?? 0);
+        selectedNumbers.length > 0 ? selectedNumbers.length : (payload.numbersRequested ?? 0);
 
       if (numbersRequested <= 0) {
         throw new Error('At least one number is required');
       }
 
-      if (
-        raffle.assignmentMode === ASSIGNMENT_MODES.customerChoice &&
-        selectedNumbers.length === 0
-      ) {
-        throw new Error('selectedNumbers is required for this raffle');
-      }
+      // Load currently taken numbers (reserved/assigned/blocked) for this raffle.
+      const takenRows = await transaction
+        .select({ number: raffleNumbers.number })
+        .from(raffleNumbers)
+        .where(eq(raffleNumbers.raffleId, raffle.id));
+      const taken = new Set<number>(takenRows.map((row) => row.number));
 
-      if (raffle.assignmentMode === ASSIGNMENT_MODES.random && selectedNumbers.length > 0) {
-        throw new Error('selectedNumbers is not allowed for random raffle assignment');
+      // Decide which numbers to reserve: explicit selection or random.
+      let allocated: readonly AllocatedNumber[];
+
+      if (selectedNumbers.length > 0) {
+        for (const number of selectedNumbers) {
+          if (number < raffle.numberMin || number > raffle.numberMax) {
+            throw new Error('A selected number is out of range');
+          }
+          if (taken.has(number)) {
+            throw new Error('One or more selected numbers are no longer available');
+          }
+        }
+        allocated = selectedNumbers.map((number) => ({
+          id: randomUUID(),
+          number,
+          displayNumber: displayNumber(number, raffle.numberPadding),
+        }));
+      } else {
+        allocated = pickRandomAvailableNumbers(
+          raffle.numberMin,
+          raffle.numberMax,
+          raffle.numberPadding,
+          numbersRequested,
+          taken,
+        );
       }
 
       const customerId = randomUUID();
       const orderId = randomUUID();
-      const amount = Number(raffle.pricePerNumber) * numbersRequested;
+      const amount = getOrderAmount(raffle, numbersRequested);
 
       await transaction.insert(customers).values({
         id: customerId,
@@ -530,61 +761,36 @@ export const createPublicOrderForRaffle = async ({
         throw new Error('Order was not created');
       }
 
-      let reservedNumbers: readonly PublicRaffleNumberRow[] = [];
-
-      if (raffle.assignmentMode === ASSIGNMENT_MODES.customerChoice) {
-        const availableNumbers = await transaction
-          .select({
-            id: raffleNumbers.id,
-            number: raffleNumbers.number,
-            displayNumber: raffleNumbers.displayNumber,
-            status: raffleNumbers.status,
-          })
-          .from(raffleNumbers)
-          .where(
-            and(
-              eq(raffleNumbers.raffleId, raffle.id),
-              eq(raffleNumbers.status, RAFFLE_NUMBER_STATUSES.available),
-              inArray(raffleNumbers.number, [...selectedNumbers]),
-            ),
-          )
-          .orderBy(asc(raffleNumbers.number));
-
-        if (availableNumbers.length !== selectedNumbers.length) {
-          throw new Error('One or more selected numbers are no longer available');
-        }
-
-        await transaction
-          .update(raffleNumbers)
-          .set({
-            status: RAFFLE_NUMBER_STATUSES.reserved,
-            reservedByOrderId: orderId,
-            reservedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(
-            inArray(
-              raffleNumbers.id,
-              availableNumbers.map((number) => number.id),
-            ),
-          );
-
-        await transaction.insert(orderNumbers).values(
-          availableNumbers.map((number) => ({
-            id: randomUUID(),
-            orderId,
-            raffleNumberId: number.id,
-            number: number.number,
-            displayNumber: number.displayNumber,
-            status: RAFFLE_NUMBER_STATUSES.reserved,
-          })),
-        );
-
-        reservedNumbers = availableNumbers.map((number) => ({
-          ...number,
+      // Materialize the reserved numbers (lazy allocation).
+      await transaction.insert(raffleNumbers).values(
+        allocated.map((item) => ({
+          id: item.id,
+          raffleId: raffle.id,
+          number: item.number,
+          displayNumber: item.displayNumber,
           status: RAFFLE_NUMBER_STATUSES.reserved,
-        }));
-      }
+          reservedByOrderId: orderId,
+          reservedAt: new Date(),
+        })),
+      );
+
+      await transaction.insert(orderNumbers).values(
+        allocated.map((item) => ({
+          id: randomUUID(),
+          orderId,
+          raffleNumberId: item.id,
+          number: item.number,
+          displayNumber: item.displayNumber,
+          status: RAFFLE_NUMBER_STATUSES.reserved,
+        })),
+      );
+
+      const reservedNumbers: readonly PublicRaffleNumberRow[] = allocated.map((item) => ({
+        id: item.id,
+        number: item.number,
+        displayNumber: item.displayNumber,
+        status: RAFFLE_NUMBER_STATUSES.reserved,
+      }));
 
       await transaction.insert(auditLogs).values({
         id: randomUUID(),
@@ -596,7 +802,7 @@ export const createPublicOrderForRaffle = async ({
           raffleId: raffle.id,
           orderId,
           numbersRequested,
-          selectedNumbers,
+          numbers: allocated.map((item) => item.number),
         },
       });
 

@@ -171,17 +171,15 @@ export const registerSellerDrawResult = async ({
         throw new Error('Draw result already registered for this raffle');
       }
 
+      // Lazy allocation: the winning number only exists as a row if it was
+      // taken. If nobody bought it, there is simply no winner (a valid outcome).
       const [winningRaffleNumber] = await transaction
         .select()
         .from(raffleNumbers)
         .where(and(eq(raffleNumbers.raffleId, raffleId), eq(raffleNumbers.number, winningNumber)))
         .limit(1);
 
-      if (!winningRaffleNumber) {
-        throw new Error('Winning number does not exist in this raffle');
-      }
-
-      let winnerOrderId: string | null = winningRaffleNumber.assignedToOrderId;
+      let winnerOrderId: string | null = winningRaffleNumber?.assignedToOrderId ?? null;
       let winnerCustomerId: string | null = null;
 
       if (winnerOrderId) {
@@ -218,13 +216,15 @@ export const registerSellerDrawResult = async ({
         throw new Error('Draw result was not created');
       }
 
-      await transaction
-        .update(raffleNumbers)
-        .set({
-          status: RAFFLE_NUMBER_STATUSES.winner,
-          updatedAt: new Date(),
-        })
-        .where(eq(raffleNumbers.id, winningRaffleNumber.id));
+      if (winningRaffleNumber) {
+        await transaction
+          .update(raffleNumbers)
+          .set({
+            status: RAFFLE_NUMBER_STATUSES.winner,
+            updatedAt: new Date(),
+          })
+          .where(eq(raffleNumbers.id, winningRaffleNumber.id));
+      }
 
       await transaction
         .update(raffles)

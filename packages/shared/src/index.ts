@@ -1,4 +1,9 @@
-export type { ParticipationPackage, RaffleLandingConfig, SellerSettings } from './landing-config';
+export type {
+  ParticipationPackage,
+  PaymentMethod,
+  RaffleLandingConfig,
+  SellerSettings,
+} from './landing-config';
 export { DEFAULT_LANDING_CONFIG, DEFAULT_SELLER_SETTINGS } from './landing-config';
 
 export const RAFFLE_STATUSES = {

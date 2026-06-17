@@ -1,5 +1,6 @@
-import type { BuyerFormState, CreatedOrder, PublicRaffle, PublicRaffleNumber } from './types';
+import type { BuyerFormState, CreatedOrder, PublicRaffle, PublicRaffleNumber, PublicWinnersContent } from './types';
 import type { SellerSettings } from '@rifa/shared';
+import { prepareImageForUpload } from './image';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -58,24 +59,6 @@ export const fetchPublicRaffleNumbers = async (
   return response.data;
 };
 
-const pickRandomNumbers = (
-  available: readonly PublicRaffleNumber[],
-  quantity: number,
-): readonly number[] => {
-  const pool = [...available];
-  const selected: number[] = [];
-
-  for (let index = 0; index < quantity && pool.length > 0; index += 1) {
-    const pickIndex = Math.floor(Math.random() * pool.length);
-    const picked = pool.splice(pickIndex, 1)[0];
-    if (picked) {
-      selected.push(picked.number);
-    }
-  }
-
-  return selected.sort((left, right) => left - right);
-};
-
 export interface CreateOrderInput {
   readonly slug: string;
   readonly raffle: PublicRaffle;
@@ -92,6 +75,11 @@ export const createPublicOrder = async ({
   readonly order: CreatedOrder;
   readonly reservedNumbers: readonly PublicRaffleNumber[];
 }> => {
+  // Lazy allocation: the buyer always requests a quantity and the server picks
+  // the numbers at random across the whole range. (`raffle` is kept in the
+  // signature for compatibility but no longer drives client-side selection.)
+  void raffle;
+
   const payload: Record<string, unknown> = {
     fullName: buyer.fullName,
     documentNumber: buyer.documentNumber,
@@ -99,20 +87,8 @@ export const createPublicOrder = async ({
     phone: buyer.phone,
     acceptedTerms: true,
     isAdultConfirmed: true,
+    numbersRequested: quantity,
   };
-
-  if (raffle.assignmentMode === 'customer_choice') {
-    const numbers = await fetchPublicRaffleNumbers(slug);
-    const available = numbers.filter((item) => item.status === 'available');
-
-    if (available.length < quantity) {
-      throw new Error('No hay suficientes participaciones disponibles.');
-    }
-
-    payload.selectedNumbers = pickRandomNumbers(available, quantity);
-  } else {
-    payload.numbersRequested = quantity;
-  }
 
   const response = await requestJson<{
     readonly data: {
@@ -182,14 +158,23 @@ export const fetchPublicDrawResult = async (slug: string): Promise<PublicDrawRes
   return body.data;
 };
 
+export const fetchPublicWinnersContent = async (
+  slug: string,
+): Promise<PublicWinnersContent> => {
+  const response = await requestJson<{ readonly data: PublicWinnersContent }>(
+    `/api/public/raffles/${slug}/winners-content`,
+  );
+  return response.data;
+};
+
 export const uploadPaymentProof = async (orderId: string, file: File): Promise<void> => {
-  const dataBase64 = await readFileAsDataUrl(file);
+  const prepared = await prepareImageForUpload(file);
   await requestJson(`/api/public/orders/${orderId}/proof`, {
     method: 'POST',
     body: JSON.stringify({
-      fileName: file.name,
-      mimeType: file.type,
-      dataBase64,
+      fileName: prepared.fileName,
+      mimeType: prepared.mimeType,
+      dataBase64: prepared.dataBase64,
     }),
   });
 };

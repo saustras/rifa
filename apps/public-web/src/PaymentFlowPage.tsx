@@ -1,4 +1,4 @@
-import { DEFAULT_LANDING_CONFIG } from '@rifa/shared';
+import { DEFAULT_LANDING_CONFIG, type PaymentMethod } from '@rifa/shared';
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import { fetchPublicOrderStatus, uploadPaymentProof } from './api';
@@ -45,6 +45,40 @@ const FLOW_STEPS: ReadonlyArray<{ id: PaymentFlowStep; label: string }> = [
   { id: 'done', label: 'Confirmación' },
 ];
 
+const buildWhatsappNotificationUrl = (session: CheckoutSession): string | null => {
+  const number = (session.ownerWhatsappNumber ?? '').replace(/\D/g, '');
+
+  if (number.length < 7) {
+    return null;
+  }
+
+  const orderRef = session.order.id.slice(0, 8).toUpperCase();
+  const numbers =
+    session.reservedNumbers.length > 0
+      ? session.reservedNumbers.map((item) => item.displayNumber).join(', ')
+      : null;
+
+  const lines = [
+    '¡Hola! Acabo de pagar y subir mi comprobante 🧾',
+    '',
+    `Campaña: ${session.raffle.title}`,
+    `Orden: #${orderRef}`,
+    `Participaciones: ${session.quantity}`,
+    `Total: ${formatMoney(session.order.amount, session.order.currency)}`,
+    '',
+    'Mis datos:',
+    `Nombre: ${session.buyer.fullName}`,
+    `Documento: ${session.buyer.documentNumber}`,
+    `Teléfono: ${session.buyer.phone}`,
+    `Email: ${session.buyer.email}`,
+    ...(numbers ? [`Números: ${numbers}`] : []),
+    '',
+    'Ya subí el comprobante en la página. Adjunto también la imagen por aquí. ¡Gracias!',
+  ];
+
+  return `https://wa.me/${number}?text=${encodeURIComponent(lines.join('\n'))}`;
+};
+
 interface PaymentFlowPageProps {
   readonly session: CheckoutSession;
   readonly onBack: () => void;
@@ -61,6 +95,7 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
 export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
   const [step, setStep] = useState<PaymentFlowStep>('pay');
   const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string>('');
   const [orderStatus, setOrderStatus] = useState(session.order.status);
@@ -118,6 +153,14 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
       await uploadPaymentProof(session.order.id, proofFile);
       setStep('done');
       window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      // Additional heads-up channel: open WhatsApp to the raffle owner with the
+      // order details prefilled. (WhatsApp links can't auto-attach the image;
+      // the buyer can attach the screenshot manually if they wish.)
+      const whatsappUrl = buildWhatsappNotificationUrl(session);
+      if (whatsappUrl) {
+        window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+      }
     } catch (uploadError: unknown) {
       setError(
         uploadError instanceof Error ? uploadError.message : 'No se pudo subir el comprobante.',
@@ -127,18 +170,55 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
     }
   };
 
+  // Release the preview object URL when it changes or on unmount.
+  useEffect(() => {
+    return () => {
+      if (proofPreview) {
+        URL.revokeObjectURL(proofPreview);
+      }
+    };
+  }, [proofPreview]);
+
   const handleProofChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setProofFile(event.target.files?.[0] ?? null);
+    const file = event.target.files?.[0] ?? null;
+    setProofFile(file);
     setError('');
+    setProofPreview((current) => {
+      if (current) {
+        URL.revokeObjectURL(current);
+      }
+      return file ? URL.createObjectURL(file) : null;
+    });
   };
 
   const currentStepIndex = FLOW_STEPS.findIndex((item) => item.id === step);
+  const whatsappNotifyUrl = buildWhatsappNotificationUrl(session);
   const landing = { ...DEFAULT_LANDING_CONFIG, ...(session.raffle.landingConfig ?? {}) };
-  const qrUrl = session.raffle.paymentQrImageUrl
+  const fallbackQrUrl = session.raffle.paymentQrImageUrl
     ? session.raffle.paymentQrImageUrl
     : `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(
         buildQrPayload(session),
       )}`;
+
+  // Prefer the seller's configured payment methods; fall back to the single
+  // legacy method built from the raffle's payment fields.
+  const configuredMethods = session.paymentMethods ?? [];
+  const paymentMethods: readonly PaymentMethod[] =
+    configuredMethods.length > 0
+      ? configuredMethods
+      : [
+          {
+            id: 'default',
+            label: session.raffle.paymentMethodLabel ?? 'Transferencia',
+            accountHolder: session.raffle.paymentAccountHolder ?? undefined,
+            accountType: session.raffle.paymentAccountType ?? undefined,
+            accountNumber: session.raffle.paymentAccountNumber ?? undefined,
+            documentNumber: session.raffle.paymentDocumentNumber ?? undefined,
+            instructions: session.raffle.paymentInstructions ?? undefined,
+            qrImageUrl: session.raffle.paymentQrImageUrl ?? undefined,
+          },
+        ];
+  const isSingleLegacyMethod = configuredMethods.length === 0;
 
   return (
     <div className="oryum-page checkout-page">
@@ -227,67 +307,84 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
                   Escanea el código QR o transfiere el monto exacto. Usa la referencia de tu orden.
                 </p>
 
-                <div className="pay-grid">
-                  <div className="qr-box">
-                    <img
-                      src={qrUrl}
-                      alt="Código QR para realizar el pago"
-                      width={220}
-                      height={220}
-                      {...(session.raffle.paymentQrImageUrl
-                        ? { className: 'qr-image-uploaded' }
-                        : {})}
-                    />
-                    <span>
-                      {session.raffle.paymentQrImageUrl
-                        ? 'Escanea el QR de pago de la campaña'
-                        : 'Escanea con tu app bancaria'}
-                    </span>
-                  </div>
-
-                  <div className="pay-details">
-                    <div className="pay-amount">
-                      <small>Monto exacto</small>
-                      <strong>{formatMoney(session.order.amount, session.order.currency)}</strong>
-                    </div>
-
-                    <ul className="pay-meta">
-                      <li>
-                        <span>Método</span>
-                        <strong>{session.raffle.paymentMethodLabel ?? 'Transferencia'}</strong>
-                      </li>
-                      {session.raffle.paymentAccountHolder ? (
-                        <li>
-                          <span>Titular</span>
-                          <strong>{session.raffle.paymentAccountHolder}</strong>
-                        </li>
-                      ) : null}
-                      {session.raffle.paymentAccountType ? (
-                        <li>
-                          <span>Tipo de cuenta</span>
-                          <strong>{session.raffle.paymentAccountType}</strong>
-                        </li>
-                      ) : null}
-                      {session.raffle.paymentAccountNumber ? (
-                        <li>
-                          <span>Cuenta / Nequi</span>
-                          <strong>{session.raffle.paymentAccountNumber}</strong>
-                        </li>
-                      ) : null}
-                      <li>
-                        <span>Referencia</span>
-                        <strong>#{orderRef}</strong>
-                      </li>
-                    </ul>
-                  </div>
+                <div className="pay-amount pay-amount-block">
+                  <small>Monto exacto a transferir</small>
+                  <strong>{formatMoney(session.order.amount, session.order.currency)}</strong>
+                  <span className="pay-reference">
+                    Referencia: <strong>#{orderRef}</strong>
+                  </span>
                 </div>
 
-                {session.raffle.paymentInstructions ? (
-                  <div className="instruction-box">
-                    <strong>Instrucciones</strong>
-                    <p>{session.raffle.paymentInstructions}</p>
-                  </div>
-                ) : null}
+                <div className="payment-methods-grid">
+                  {paymentMethods.map((method) => {
+                    const qrSrc = method.qrImageUrl
+                      ? method.qrImageUrl
+                      : isSingleLegacyMethod
+                        ? fallbackQrUrl
+                        : null;
+
+                    return (
+                      <div className="pay-method-card" key={method.id}>
+                        <h3 className="pay-method-title">{method.label}</h3>
+
+                        <div className="pay-grid">
+                          {qrSrc ? (
+                            <div className="qr-box">
+                              <img
+                                src={qrSrc}
+                                alt={`Código QR para pagar con ${method.label}`}
+                                width={200}
+                                height={200}
+                                {...(method.qrImageUrl ? { className: 'qr-image-uploaded' } : {})}
+                              />
+                              <span>
+                                {method.qrImageUrl
+                                  ? 'Escanea el QR de este método'
+                                  : 'Escanea con tu app bancaria'}
+                              </span>
+                            </div>
+                          ) : null}
+
+                          <div className="pay-details">
+                            <ul className="pay-meta">
+                              {method.accountHolder ? (
+                                <li>
+                                  <span>Titular</span>
+                                  <strong>{method.accountHolder}</strong>
+                                </li>
+                              ) : null}
+                              {method.accountType ? (
+                                <li>
+                                  <span>Tipo de cuenta</span>
+                                  <strong>{method.accountType}</strong>
+                                </li>
+                              ) : null}
+                              {method.accountNumber ? (
+                                <li>
+                                  <span>Cuenta / Nequi</span>
+                                  <strong>{method.accountNumber}</strong>
+                                </li>
+                              ) : null}
+                              {method.documentNumber ? (
+                                <li>
+                                  <span>Documento / NIT</span>
+                                  <strong>{method.documentNumber}</strong>
+                                </li>
+                              ) : null}
+                            </ul>
+                          </div>
+                        </div>
+
+                        {method.instructions ? (
+                          <div className="instruction-box">
+                            <strong>Instrucciones</strong>
+                            <p>{method.instructions}</p>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
 
                 <ol className="instruction-steps">
                   <li>Abre tu app bancaria o billetera digital.</li>
@@ -315,26 +412,50 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
                 </p>
 
                 <form className="proof-form" onSubmit={handleProofSubmit}>
-                  <label className="proof-upload">
+                  <label className={`proof-upload${proofPreview ? ' has-preview' : ''}`}>
                     <input
-                      accept="image/png,image/jpeg,image/webp"
+                      accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
                       onChange={handleProofChange}
                       type="file"
                       disabled={isUploading}
                     />
-                    <span className="proof-upload-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" fill="none">
-                        <path
-                          d="M12 16V6m0 0l-3 3m3-3l3 3M4 18v1a2 2 0 002 2h12a2 2 0 002-2v-1"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </span>
-                    <strong>{proofFile ? proofFile.name : 'Toca para subir comprobante'}</strong>
-                    <small>PNG, JPG o WEBP</small>
+                    {proofPreview ? (
+                      <img
+                        className="proof-preview-image"
+                        src={proofPreview}
+                        alt="Vista previa del comprobante"
+                        onError={() => {
+                          // Some formats (e.g. HEIC on Android) can't be shown;
+                          // fall back to the filename + confirmation text.
+                          setProofPreview((current) => {
+                            if (current) {
+                              URL.revokeObjectURL(current);
+                            }
+                            return null;
+                          });
+                        }}
+                      />
+                    ) : (
+                      <span className="proof-upload-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                          <path
+                            d="M12 16V6m0 0l-3 3m3-3l3 3M4 18v1a2 2 0 002 2h12a2 2 0 002-2v-1"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </span>
+                    )}
+                    <strong>
+                      {proofFile ? proofFile.name : 'Toca para subir comprobante'}
+                    </strong>
+                    <small>
+                      {proofFile
+                        ? '✓ Comprobante listo · toca para cambiarlo'
+                        : 'Foto o captura · se optimiza automáticamente'}
+                    </small>
                   </label>
 
                   {error ? (
@@ -403,6 +524,29 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
                     contactaremos para ayudarte.
                   </p>
                 </div>
+
+                {whatsappNotifyUrl ? (
+                  <a
+                    className="btn btn-whatsapp btn-block"
+                    href={whatsappNotifyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width={18} height={18}>
+                      <path
+                        d="M12 3.5a8.5 8.5 0 00-7.3 12.8L3.5 20.5l4.4-1.1A8.5 8.5 0 1012 3.5z"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M9.2 8.2c.2-.5.4-.5.6-.5h.5c.2 0 .4 0 .6.5l.6 1.4c.1.2 0 .4 0 .5l-.4.5c-.1.2-.2.3 0 .6.3.5.7 1 1.2 1.3.5.3.7.3.9.2l.5-.4c.2-.2.4-.1.5-.1l1.3.6c.2.1.4.2.4.4 0 .5-.2 1.2-.7 1.5-.5.3-1.4.5-2.6 0-1.6-.6-3-2-3.8-3.6-.5-1-.4-1.8-.1-2.4z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                    Avisar al organizador por WhatsApp
+                  </a>
+                ) : null}
 
                 <button type="button" className="btn btn-primary btn-block" onClick={onBack}>
                   Volver al inicio

@@ -268,6 +268,10 @@ export const drawResults = pgTable(
     }),
     evidenceUrl: text('evidence_url'),
     notes: text('notes'),
+    isPublicWinner: boolean('is_public_winner').notNull().default(false),
+    winnerPhotoUrl: text('winner_photo_url'),
+    winnerComment: text('winner_comment'),
+    displayOrder: integer('display_order').notNull().default(0),
     registeredByUserId: text('registered_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
@@ -275,6 +279,24 @@ export const drawResults = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex('draw_results_raffle_unique').on(table.raffleId)],
+);
+
+export const deliveryGalleryImages = pgTable(
+  'delivery_gallery_images',
+  {
+    id: text('id').primaryKey(),
+    sellerId: text('seller_id')
+      .notNull()
+      .references(() => sellers.id, { onDelete: 'cascade' }),
+    imageUrl: text('image_url').notNull(),
+    title: text('title'),
+    caption: text('caption'),
+    isPublic: boolean('is_public').notNull().default(true),
+    displayOrder: integer('display_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('delivery_gallery_seller_public_idx').on(table.sellerId, table.isPublic)],
 );
 
 export const notificationLogs = pgTable(

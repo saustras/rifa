@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { blockNumber, fetchRaffleNumbers, releaseNumber } from '../api';
+import { blockNumberByValue, fetchRaffleNumbers, releaseNumber } from '../api';
 import type { AdminCredentials, AdminRaffle, AdminRaffleNumber } from '../types';
 
 interface NumbersPageProps {
@@ -17,6 +17,35 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelado',
 };
 
+const formatDate = (iso: string | null): string => {
+  if (!iso) {
+    return '—';
+  }
+
+  try {
+    return new Intl.DateTimeFormat('es-CO', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+};
+
+const formatMoney = (amount: string | null, currency: string | null): string => {
+  const value = Number(amount);
+
+  if (!Number.isFinite(value)) {
+    return '—';
+  }
+
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: currency || 'COP',
+    maximumFractionDigits: 0,
+  }).format(value);
+};
+
 export const NumbersPage = ({ credentials, raffles }: NumbersPageProps) => {
   const [selectedRaffleId, setSelectedRaffleId] = useState(raffles[0]?.id ?? '');
   const [numbers, setNumbers] = useState<readonly AdminRaffleNumber[]>([]);
@@ -24,7 +53,11 @@ export const NumbersPage = ({ credentials, raffles }: NumbersPageProps) => {
   const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [selectedNumberId, setSelectedNumberId] = useState<string>('');
+  const [modalNumber, setModalNumber] = useState<AdminRaffleNumber | null>(null);
+  const [blockValue, setBlockValue] = useState('');
+  const [message, setMessage] = useState('');
+
+  const selectedRaffle = raffles.find((raffle) => raffle.id === selectedRaffleId) ?? null;
 
   const loadNumbers = async (raffleId: string) => {
     setIsLoading(true);
@@ -57,14 +90,19 @@ export const NumbersPage = ({ credentials, raffles }: NumbersPageProps) => {
   }, [credentials, selectedRaffleId]);
 
   const summary = useMemo(() => {
-    const total = numbers.length;
-    const available = numbers.filter((item) => item.status === 'available').length;
+    // With lazy allocation, only taken numbers exist as rows. The total comes
+    // from the raffle range and "available" is computed (range - taken).
+    const total = selectedRaffle
+      ? Math.max(0, selectedRaffle.numberMax - selectedRaffle.numberMin + 1)
+      : 0;
     const reserved = numbers.filter((item) => item.status === 'reserved').length;
     const assigned = numbers.filter((item) => item.status === 'assigned').length;
     const blocked = numbers.filter((item) => item.status === 'blocked').length;
+    const taken = numbers.length;
+    const available = Math.max(0, total - taken);
 
     return { total, available, reserved, assigned, blocked };
-  }, [numbers]);
+  }, [numbers, selectedRaffle]);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -78,30 +116,42 @@ export const NumbersPage = ({ credentials, raffles }: NumbersPageProps) => {
     });
   }, [numbers, search, statusFilter]);
 
-  const selectedNumber = numbers.find((item) => item.id === selectedNumberId);
+  const handleBlockByValue = async () => {
+    setError('');
+    setMessage('');
 
-  const handleBlock = async () => {
-    if (!selectedNumberId) {
+    const value = Number(blockValue.trim());
+
+    if (!selectedRaffle || !Number.isInteger(value)) {
+      setError('Escribe un número válido para bloquear.');
       return;
     }
 
-    const ok = await blockNumber(credentials, selectedNumberId);
+    if (value < selectedRaffle.numberMin || value > selectedRaffle.numberMax) {
+      setError(
+        `El número debe estar entre ${selectedRaffle.numberMin} y ${selectedRaffle.numberMax}.`,
+      );
+      return;
+    }
+
+    const ok = await blockNumberByValue(credentials, selectedRaffleId, value);
 
     if (!ok) {
-      setError('No se pudo bloquear el número.');
+      setError('No se pudo bloquear: el número ya está tomado o fuera de rango.');
       return;
     }
 
+    setBlockValue('');
+    setMessage(`Número ${value} bloqueado.`);
     await loadNumbers(selectedRaffleId);
-    setError('');
   };
 
   const handleRelease = async () => {
-    if (!selectedNumberId) {
+    if (!modalNumber) {
       return;
     }
 
-    const ok = await releaseNumber(credentials, selectedNumberId);
+    const ok = await releaseNumber(credentials, modalNumber.id);
 
     if (!ok) {
       setError('No se pudo liberar el número.');
@@ -109,8 +159,15 @@ export const NumbersPage = ({ credentials, raffles }: NumbersPageProps) => {
     }
 
     await loadNumbers(selectedRaffleId);
+    setModalNumber(null);
     setError('');
   };
+
+  const hasBuyerInfo = modalNumber && (
+    modalNumber.status === 'reserved' ||
+    modalNumber.status === 'assigned' ||
+    modalNumber.status === 'winner'
+  ) && modalNumber.customerName;
 
   if (raffles.length === 0) {
     return (
@@ -164,8 +221,32 @@ export const NumbersPage = ({ credentials, raffles }: NumbersPageProps) => {
                 onChange={(event) => setSearch(event.target.value)}
               />
             </label>
+            <label className="field">
+              <span>Bloquear número</span>
+              <div className="block-number-row">
+                <input
+                  type="number"
+                  placeholder="Ej: 1234"
+                  value={blockValue}
+                  onChange={(event) => setBlockValue(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => void handleBlockByValue()}
+                >
+                  Bloquear
+                </button>
+              </div>
+            </label>
           </div>
         </header>
+
+        {message ? (
+          <p className="alert alert-success" role="status">
+            {message}
+          </p>
+        ) : null}
 
         <div className="kpi-grid kpi-grid-compact">
           <div className="kpi-mini">
@@ -197,42 +278,142 @@ export const NumbersPage = ({ credentials, raffles }: NumbersPageProps) => {
           </p>
         ) : null}
 
+        <p className="muted">
+          Se muestran solo los números tomados (vendidos, reservados o bloqueados). Los disponibles
+          se asignan al azar cuando alguien compra.
+        </p>
+
+        {!isLoading && numbers.length === 0 ? (
+          <p className="muted">Todavía no hay números tomados en esta campaña.</p>
+        ) : null}
+
         <div className="numbers-grid">
           {filtered.map((item) => (
             <button
               key={item.id}
               type="button"
-              className={`number-tile status-${item.status}${item.id === selectedNumberId ? ' is-selected' : ''}`}
-              onClick={() => setSelectedNumberId(item.id)}
+              className={`number-tile status-${item.status}${modalNumber?.id === item.id ? ' is-selected' : ''}`}
+              onClick={() => setModalNumber(item)}
             >
               {item.displayNumber}
               <small>{STATUS_LABELS[item.status] ?? item.status}</small>
             </button>
           ))}
         </div>
+      </article>
 
-        {selectedNumber ? (
-          <div className="panel-actions">
-            <span className="muted">
-              Seleccionado: <strong>{selectedNumber.displayNumber}</strong>
-            </span>
-            {selectedNumber.status === 'available' ? (
-              <button type="button" className="btn btn-ghost" onClick={() => void handleBlock()}>
-                Bloquear
-              </button>
-            ) : null}
-            {selectedNumber.status === 'blocked' || selectedNumber.status === 'reserved' ? (
+      {modalNumber ? (
+        <>
+          <button
+            type="button"
+            className="modal-backdrop"
+            aria-label="Cerrar detalle"
+            onClick={() => setModalNumber(null)}
+          />
+          <dialog className="number-detail-modal" open aria-labelledby="number-modal-title">
+            <header className="modal-head">
+              <div>
+                <p className="modal-eyebrow">Detalle del número</p>
+                <h2 id="number-modal-title">
+                  {modalNumber.displayNumber}
+                </h2>
+              </div>
               <button
                 type="button"
-                className="btn btn-primary"
-                onClick={() => void handleRelease()}
+                className="modal-close"
+                aria-label="Cerrar"
+                onClick={() => setModalNumber(null)}
               >
-                Liberar
+                ×
               </button>
+            </header>
+
+            <dl className="modal-detail-grid">
+              <div>
+                <dt>Número</dt>
+                <dd>{modalNumber.displayNumber}</dd>
+              </div>
+              <div>
+                <dt>Estado</dt>
+                <dd>
+                  <span className={`status-pill status-${modalNumber.status}`}>
+                    {STATUS_LABELS[modalNumber.status] ?? modalNumber.status}
+                  </span>
+                </dd>
+              </div>
+            </dl>
+
+            {hasBuyerInfo ? (
+              <>
+                <h3 className="modal-section-title">Datos del comprador</h3>
+                <dl className="modal-detail-grid">
+                  <div>
+                    <dt>Nombre</dt>
+                    <dd>{modalNumber.customerName}</dd>
+                  </div>
+                  <div>
+                    <dt>Email</dt>
+                    <dd>{modalNumber.customerEmail ?? '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Teléfono</dt>
+                    <dd>{modalNumber.customerPhone ?? '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Documento</dt>
+                    <dd>{modalNumber.customerDocument ?? '—'}</dd>
+                  </div>
+                  {modalNumber.customerCity ? (
+                    <div>
+                      <dt>Ciudad</dt>
+                      <dd>{modalNumber.customerCity}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+
+                <h3 className="modal-section-title">Datos de la compra</h3>
+                <dl className="modal-detail-grid">
+                  <div>
+                    <dt>Orden</dt>
+                    <dd>{modalNumber.orderId ?? '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Monto</dt>
+                    <dd>{formatMoney(modalNumber.orderAmount, modalNumber.orderCurrency)}</dd>
+                  </div>
+                  <div>
+                    <dt>Fecha</dt>
+                    <dd>{formatDate(modalNumber.orderCreatedAt)}</dd>
+                  </div>
+                  <div>
+                    <dt>Estado de la orden</dt>
+                    <dd>{modalNumber.orderStatus ?? '—'}</dd>
+                  </div>
+                </dl>
+              </>
             ) : null}
-          </div>
-        ) : null}
-      </article>
+
+            <div className="modal-actions">
+              {modalNumber.status === 'blocked' || modalNumber.status === 'reserved' ? (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => void handleRelease()}
+                >
+                  Liberar número
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setModalNumber(null)}
+              >
+                Cerrar
+              </button>
+            </div>
+          </dialog>
+        </>
+      ) : null}
     </section>
   );
 };

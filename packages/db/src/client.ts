@@ -38,7 +38,29 @@ export const ensureLocalSchema = async (client: RuntimeDatabaseClient): Promise<
     ALTER TABLE raffles ADD COLUMN IF NOT EXISTS landing_config jsonb;
     ALTER TABLE raffles ADD COLUMN IF NOT EXISTS payment_qr_image_url text;
     ALTER TABLE sellers ADD COLUMN IF NOT EXISTS settings jsonb;
+    ALTER TABLE draw_results ADD COLUMN IF NOT EXISTS is_public_winner boolean NOT NULL DEFAULT false;
+    ALTER TABLE draw_results ADD COLUMN IF NOT EXISTS winner_photo_url text;
+    ALTER TABLE draw_results ADD COLUMN IF NOT EXISTS winner_comment text;
+    ALTER TABLE draw_results ADD COLUMN IF NOT EXISTS display_order integer NOT NULL DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS delivery_gallery_images (
+      id text PRIMARY KEY,
+      seller_id text NOT NULL REFERENCES sellers(id) ON DELETE cascade,
+      image_url text NOT NULL,
+      title text,
+      caption text,
+      is_public boolean NOT NULL DEFAULT true,
+      display_order integer NOT NULL DEFAULT 0,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS delivery_gallery_seller_public_idx
+      ON delivery_gallery_images(seller_id, is_public);
   `);
+
+  // Migrate raffles created under the old eager model to lazy allocation:
+  // available numbers must NOT have rows (no row = available). This is
+  // idempotent and only removes rows that carry no reservation/assignment.
+  await client.exec(`DELETE FROM raffle_numbers WHERE status = 'available';`);
 };
 
 export const createPgliteDatabase = (dataDir = resolveLocalPgliteDataDir()) => {

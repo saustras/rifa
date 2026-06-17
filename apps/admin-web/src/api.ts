@@ -1,21 +1,47 @@
 import type {
   AdminCredentials,
   AdminCustomer,
+  AdminCustomerDetail,
   AdminLoginCredentials,
   AdminPrize,
   AdminRaffle,
   AdminRaffleNumber,
   AdminSession,
+  AdminWinner,
+  CreateManualOrderInput,
   CreateRaffleInput,
+  DeliveryGalleryImage,
   DrawResult,
   OrderDetail,
   OrderListRow,
   SellerSettings,
   UpdateRaffleInput,
 } from './types';
+import { prepareImageForUpload } from './image';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 const ADMIN_SESSION_KEY = 'rifa-admin-session';
+
+export interface AdminValidationDetails {
+  readonly formErrors?: readonly string[];
+  readonly fieldErrors?: Record<string, readonly string[]>;
+}
+
+export class AdminApiError extends Error {
+  readonly code?: string;
+  readonly details?: AdminValidationDetails;
+
+  constructor(message: string, options?: { readonly code?: string; readonly details?: AdminValidationDetails }) {
+    super(message);
+    this.name = 'AdminApiError';
+    if (options?.code !== undefined) {
+      this.code = options.code;
+    }
+    if (options?.details !== undefined) {
+      this.details = options.details;
+    }
+  }
+}
 
 const isAdminSession = (value: unknown): value is AdminSession => {
   if (typeof value !== 'object' || value === null) {
@@ -92,6 +118,56 @@ const getResponseMessage = (body: unknown): string => {
   return 'No se pudo completar la solicitud.';
 };
 
+const readValidationDetails = (body: unknown): AdminValidationDetails | undefined => {
+  if (
+    typeof body !== 'object' ||
+    body === null ||
+    !('details' in body) ||
+    typeof body.details !== 'object' ||
+    body.details === null
+  ) {
+    return undefined;
+  }
+
+  const details = body.details as Record<string, unknown>;
+  const fieldErrors: Record<string, readonly string[]> = {};
+
+  if (typeof details.fieldErrors === 'object' && details.fieldErrors !== null) {
+    for (const [fieldName, messages] of Object.entries(
+      details.fieldErrors as Record<string, unknown>,
+    )) {
+      if (Array.isArray(messages) && messages.every((message) => typeof message === 'string')) {
+        fieldErrors[fieldName] = messages;
+      }
+    }
+  }
+
+  const formErrors =
+    Array.isArray(details.formErrors) &&
+    details.formErrors.every((message) => typeof message === 'string')
+      ? details.formErrors
+      : undefined;
+
+  const hasFieldErrors = Object.keys(fieldErrors).length > 0;
+
+  if (!hasFieldErrors && !formErrors) {
+    return undefined;
+  }
+
+  return {
+    ...(hasFieldErrors ? { fieldErrors } : {}),
+    ...(formErrors ? { formErrors } : {}),
+  };
+};
+
+const readErrorCode = (body: unknown): string | undefined => {
+  if (typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string') {
+    return body.error;
+  }
+
+  return undefined;
+};
+
 export const loginAdmin = async (credentials: AdminLoginCredentials): Promise<AdminSession> => {
   const response = await fetch(`${API_BASE_URL}/api/admin/auth/login`, {
     method: 'POST',
@@ -101,7 +177,12 @@ export const loginAdmin = async (credentials: AdminLoginCredentials): Promise<Ad
   const body = (await response.json().catch(() => ({}))) as unknown;
 
   if (!response.ok) {
-    throw new Error(getResponseMessage(body));
+    const code = readErrorCode(body);
+    const details = readValidationDetails(body);
+    throw new AdminApiError(getResponseMessage(body), {
+      ...(code ? { code } : {}),
+      ...(details ? { details } : {}),
+    });
   }
 
   if (!isAdminSession(body)) {
@@ -128,7 +209,14 @@ const requestAdminJson = async <T>(
   const body = (await response.json().catch(() => ({}))) as unknown;
 
   if (!response.ok) {
-    throw new Error(getResponseMessage(body));
+    // Surface validation field errors so the UI can tell the user exactly
+    // which field failed, instead of a generic message.
+    const code = readErrorCode(body);
+    const details = readValidationDetails(body);
+    throw new AdminApiError(getResponseMessage(body), {
+      ...(code ? { code } : {}),
+      ...(details ? { details } : {}),
+    });
   }
 
   return body as T;
@@ -305,28 +393,14 @@ export const uploadRaffleCover = async (
   raffleId: string,
   file: File,
 ): Promise<string> => {
-  const dataBase64 = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
-    reader.readAsDataURL(file);
-  });
-
-  const mimeType = file.type;
-  if (mimeType !== 'image/jpeg' && mimeType !== 'image/png' && mimeType !== 'image/webp') {
-    throw new Error('Formato no soportado. Usa JPG, PNG o WebP.');
-  }
+  const prepared = await prepareImageForUpload(file);
 
   const response = await requestAdminJson<{ readonly data: { readonly coverImageUrl: string } }>(
     `/api/admin/raffles/${raffleId}/cover`,
     credentials,
     {
       method: 'POST',
-      body: JSON.stringify({
-        fileName: file.name,
-        mimeType,
-        dataBase64,
-      }),
+      body: JSON.stringify(prepared),
     },
   );
 
@@ -338,27 +412,13 @@ export const uploadRafflePaymentQr = async (
   raffleId: string,
   file: File,
 ): Promise<string> => {
-  const dataBase64 = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
-    reader.readAsDataURL(file);
-  });
-
-  const mimeType = file.type;
-  if (mimeType !== 'image/jpeg' && mimeType !== 'image/png' && mimeType !== 'image/webp') {
-    throw new Error('Formato no soportado. Usa JPG, PNG o WebP.');
-  }
+  const prepared = await prepareImageForUpload(file);
 
   const response = await requestAdminJson<{
     readonly data: { readonly paymentQrImageUrl: string };
   }>(`/api/admin/raffles/${raffleId}/payment-qr`, credentials, {
     method: 'POST',
-    body: JSON.stringify({
-      fileName: file.name,
-      mimeType,
-      dataBase64,
-    }),
+    body: JSON.stringify(prepared),
   });
 
   return response.data.paymentQrImageUrl;
@@ -368,26 +428,46 @@ export const uploadDefaultPaymentQr = async (
   credentials: AdminCredentials,
   file: File,
 ): Promise<string> => {
-  const dataBase64 = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
-    reader.readAsDataURL(file);
-  });
-
-  const mimeType = file.type;
-  if (mimeType !== 'image/jpeg' && mimeType !== 'image/png' && mimeType !== 'image/webp') {
-    throw new Error('Formato no soportado. Usa JPG, PNG o WebP.');
-  }
+  const prepared = await prepareImageForUpload(file);
 
   const response = await requestAdminJson<{
     readonly data: { readonly paymentQrImageUrl: string; readonly settings: SellerSettings };
   }>('/api/admin/settings/payment-qr', credentials, {
     method: 'POST',
-    body: JSON.stringify({ fileName: file.name, mimeType, dataBase64 }),
+    body: JSON.stringify(prepared),
   });
 
   return response.data.paymentQrImageUrl;
+};
+
+export const uploadPaymentMethodQr = async (
+  credentials: AdminCredentials,
+  file: File,
+): Promise<string> => {
+  const prepared = await prepareImageForUpload(file);
+
+  const response = await requestAdminJson<{ readonly data: { readonly qrImageUrl: string } }>(
+    '/api/admin/settings/payment-method-qr',
+    credentials,
+    {
+      method: 'POST',
+      body: JSON.stringify(prepared),
+    },
+  );
+
+  return response.data.qrImageUrl;
+};
+
+export const createManualOrder = async (
+  credentials: AdminCredentials,
+  payload: CreateManualOrderInput,
+): Promise<OrderDetail> => {
+  const response = await requestAdminJson<{ readonly data: OrderDetail }>(
+    '/api/admin/orders/manual',
+    credentials,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+  return response.data;
 };
 
 export const fetchCustomers = async (
@@ -395,6 +475,17 @@ export const fetchCustomers = async (
 ): Promise<readonly AdminCustomer[]> => {
   const response = await requestAdminJson<{ readonly data: readonly AdminCustomer[] }>(
     '/api/admin/customers',
+    credentials,
+  );
+  return response.data;
+};
+
+export const fetchCustomerDetail = async (
+  credentials: AdminCredentials,
+  customerId: string,
+): Promise<AdminCustomerDetail> => {
+  const response = await requestAdminJson<{ readonly data: AdminCustomerDetail }>(
+    `/api/admin/customers/${customerId}/detail`,
     credentials,
   );
   return response.data;
@@ -470,6 +561,110 @@ export const registerDrawResult = async (
   return response.data;
 };
 
+export const fetchWinners = async (
+  credentials: AdminCredentials,
+): Promise<readonly AdminWinner[]> => {
+  const response = await requestAdminJson<{ readonly data: readonly AdminWinner[] }>(
+    '/api/admin/winners',
+    credentials,
+  );
+  return response.data;
+};
+
+export const updateWinner = async (
+  credentials: AdminCredentials,
+  winnerId: string,
+  payload: {
+    readonly isPublicWinner?: boolean;
+    readonly winnerComment?: string | null;
+    readonly displayOrder?: number;
+  },
+): Promise<AdminWinner> => {
+  const response = await requestAdminJson<{ readonly data: AdminWinner }>(
+    `/api/admin/winners/${winnerId}`,
+    credentials,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+  );
+  return response.data;
+};
+
+export const uploadWinnerPhoto = async (
+  credentials: AdminCredentials,
+  winnerId: string,
+  file: File,
+): Promise<AdminWinner> => {
+  const prepared = await prepareImageForUpload(file);
+  const response = await requestAdminJson<{ readonly data: AdminWinner }>(
+    `/api/admin/winners/${winnerId}/photo`,
+    credentials,
+    { method: 'POST', body: JSON.stringify(prepared) },
+  );
+  return response.data;
+};
+
+export const fetchDeliveryGallery = async (
+  credentials: AdminCredentials,
+): Promise<readonly DeliveryGalleryImage[]> => {
+  const response = await requestAdminJson<{ readonly data: readonly DeliveryGalleryImage[] }>(
+    '/api/admin/delivery-gallery',
+    credentials,
+  );
+  return response.data;
+};
+
+export const createDeliveryGalleryImage = async (
+  credentials: AdminCredentials,
+  payload: {
+    readonly file: File;
+    readonly title?: string;
+    readonly caption?: string;
+    readonly isPublic?: boolean;
+    readonly displayOrder?: number;
+  },
+): Promise<DeliveryGalleryImage> => {
+  const prepared = await prepareImageForUpload(payload.file);
+  const response = await requestAdminJson<{ readonly data: DeliveryGalleryImage }>(
+    '/api/admin/delivery-gallery',
+    credentials,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        title: payload.title,
+        caption: payload.caption,
+        isPublic: payload.isPublic,
+        displayOrder: payload.displayOrder,
+        image: prepared,
+      }),
+    },
+  );
+  return response.data;
+};
+
+export const updateDeliveryGalleryImage = async (
+  credentials: AdminCredentials,
+  imageId: string,
+  payload: {
+    readonly title?: string | null;
+    readonly caption?: string | null;
+    readonly isPublic?: boolean;
+    readonly displayOrder?: number;
+  },
+): Promise<DeliveryGalleryImage> => {
+  const response = await requestAdminJson<{ readonly data: DeliveryGalleryImage }>(
+    `/api/admin/delivery-gallery/${imageId}`,
+    credentials,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+  );
+  return response.data;
+};
+
+export const deleteDeliveryGalleryImage = async (
+  credentials: AdminCredentials,
+  imageId: string,
+): Promise<void> => {
+  await requestAdminJson(`/api/admin/delivery-gallery/${imageId}`, credentials, { method: 'DELETE' });
+};
+
 export const fetchPrizes = async (
   credentials: AdminCredentials,
   raffleId: string,
@@ -501,14 +696,15 @@ export const deletePrize = async (
   await requestAdminJson(`/api/admin/prizes/${prizeId}`, credentials, { method: 'DELETE' });
 };
 
-export const blockNumber = async (
+export const blockNumberByValue = async (
   credentials: AdminCredentials,
-  raffleNumberId: string,
+  raffleId: string,
+  number: number,
 ): Promise<boolean> => {
   const response = await requestAdminJson<{ readonly data: { readonly ok: boolean } }>(
-    `/api/admin/numbers/${raffleNumberId}/block`,
+    '/api/admin/numbers/block',
     credentials,
-    { method: 'POST', body: JSON.stringify({}) },
+    { method: 'POST', body: JSON.stringify({ raffleId, number }) },
   );
   return response.data.ok;
 };

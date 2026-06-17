@@ -9,11 +9,12 @@ import {
   fetchPublicRaffle,
   fetchPublicRaffleNumbers,
   fetchPublicSellerSettings,
+  fetchPublicWinnersContent,
 } from './api';
 import type { PublicDrawResult } from './api';
 import { Logo } from './components/Logo';
 import { PaymentFlowPage } from './PaymentFlowPage';
-import type { BuyerFormState, CampaignStats, CheckoutSession, PublicRaffle } from './types';
+import type { BuyerFormState, CampaignStats, CheckoutSession, PublicRaffle, PublicWinnersContent } from './types';
 
 import './styles.css';
 
@@ -33,8 +34,6 @@ const initialBuyerForm: BuyerFormState = {
   email: '',
   phone: '',
 };
-
-const FALLBACK_CAMPAIGN_END_ISO = '2026-06-30T20:00:00-05:00';
 
 const buildCampaignStats = (
   raffle: PublicRaffle,
@@ -64,6 +63,7 @@ const normalizeParticipationPackages = (
     .map((item) => ({
       label: item.label?.trim(),
       quantity: Math.trunc(Number(item.quantity)),
+      price: item.price === undefined ? undefined : Number(item.price),
     }))
     .filter((item) => Number.isFinite(item.quantity) && item.quantity >= 1 && item.quantity <= 100)
     .filter((item) => {
@@ -78,7 +78,30 @@ const normalizeParticipationPackages = (
     .map((item) => ({
       quantity: item.quantity,
       ...(item.label ? { label: item.label } : {}),
+      ...(Number.isFinite(item.price) && Number(item.price) > 0 ? { price: Number(item.price) } : {}),
     }));
+};
+
+const getPackagePrice = (item: ParticipationPackage, fallbackPricePerTicket: number): number => {
+  const configuredPrice = Number(item.price);
+
+  return Number.isFinite(configuredPrice) && configuredPrice > 0
+    ? configuredPrice
+    : fallbackPricePerTicket * item.quantity;
+};
+
+// Extracts a WhatsApp-ready phone number (digits only, international format)
+// from the configured wa.me URL, falling back to the support phone.
+const extractWhatsappNumber = (
+  whatsappUrl: string | undefined,
+  supportPhone: string | undefined,
+): string => {
+  const fromUrl = (whatsappUrl ?? '').replace(/\D/g, '');
+  if (fromUrl.length >= 7) {
+    return fromUrl;
+  }
+
+  return (supportPhone ?? '').replace(/\D/g, '');
 };
 
 const sellerSettingsToLandingDefaults = (
@@ -101,32 +124,9 @@ const sellerSettingsToLandingDefaults = (
     instagramUrl: settings.instagramUrl,
     facebookUrl: settings.facebookUrl,
     youtubeUrl: settings.youtubeUrl,
+    whatsappUrl: settings.whatsappUrl,
     footerBrandText: settings.footerBrandText,
     copyrightText: settings.copyrightText,
-  };
-};
-
-interface CountdownState {
-  readonly days: string;
-  readonly hours: string;
-  readonly minutes: string;
-  readonly seconds: string;
-}
-
-const computeCountdown = (targetIso: string): CountdownState => {
-  const target = new Date(targetIso).getTime();
-  const diff = Math.max(0, target - Date.now());
-  const totalSeconds = Math.floor(diff / 1000);
-  const days = Math.floor(totalSeconds / 86_400);
-  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
-  const minutes = Math.floor((totalSeconds % 3_600) / 60);
-  const seconds = totalSeconds % 60;
-
-  return {
-    days: String(days).padStart(2, '0'),
-    hours: String(hours).padStart(2, '0'),
-    minutes: String(minutes).padStart(2, '0'),
-    seconds: String(seconds).padStart(2, '0'),
   };
 };
 
@@ -352,17 +352,18 @@ function App() {
     availableTickets: 100,
     soldPercentage: 0,
   });
-  const [campaignEndIso, setCampaignEndIso] = useState<string>(FALLBACK_CAMPAIGN_END_ISO);
   const [drawResult, setDrawResult] = useState<PublicDrawResult | null>(null);
+  const [winnersContent, setWinnersContent] = useState<PublicWinnersContent>({
+    winners: [],
+    gallery: [],
+  });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string>('');
   const [loadError, setLoadError] = useState<string>('');
   const [sellerSettings, setSellerSettings] = useState<SellerSettings | null>(null);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
-  const [countdown, setCountdown] = useState<CountdownState>(() =>
-    computeCountdown(FALLBACK_CAMPAIGN_END_ISO),
-  );
   const [navScrolled, setNavScrolled] = useState<boolean>(false);
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
 
   const pricePerTicket = raffle ? Number(raffle.pricePerNumber) : 10_000;
   const landing: RaffleLandingConfig = {
@@ -372,6 +373,10 @@ function App() {
   };
   const participationPackages = normalizeParticipationPackages(landing.participationPackages);
   const hasParticipationPackages = participationPackages.length > 0;
+  const selectedParticipationPackage = participationPackages.find((item) => item.quantity === quantity);
+  const displayPurchasePrice = selectedParticipationPackage
+    ? getPackagePrice(selectedParticipationPackage, pricePerTicket)
+    : pricePerTicket;
   const heroImageSrc = raffle?.coverImageUrl ?? '/motorcycle-prize-nobg.png';
   const heroImageAlt = landing.prizeLabel ?? raffle?.title ?? 'Premio de la campaña';
   const drawSummary =
@@ -442,6 +447,7 @@ function App() {
     { label: 'Instagram', href: landing.instagramUrl, icon: 'instagram' },
     { label: 'Facebook', href: landing.facebookUrl, icon: 'facebook' },
     { label: 'YouTube', href: landing.youtubeUrl, icon: 'youtube' },
+    { label: 'WhatsApp', href: landing.whatsappUrl, icon: 'whatsapp' },
   ].filter((item): item is { label: string; href: string; icon: string } =>
     Boolean(item.href?.trim()),
   );
@@ -455,10 +461,11 @@ function App() {
           ? await fetchPublicRaffle(DEFAULT_RAFFLE_SLUG)
           : await fetchCurrentPublicRaffle();
         const activeSlug = selectedRaffle.slug;
-        const [loadedRaffle, numbers, result] = await Promise.all([
+        const [loadedRaffle, numbers, result, loadedWinnersContent] = await Promise.all([
           Promise.resolve(selectedRaffle),
           fetchPublicRaffleNumbers(activeSlug),
           fetchPublicDrawResult(activeSlug).catch(() => null),
+          fetchPublicWinnersContent(activeSlug).catch(() => ({ winners: [], gallery: [] })),
         ]);
 
         if (!active) {
@@ -467,14 +474,18 @@ function App() {
 
         setRaffle(loadedRaffle);
         setStats(buildCampaignStats(loadedRaffle, numbers));
-        setCampaignEndIso(loadedRaffle.drawDate ?? FALLBACK_CAMPAIGN_END_ISO);
         setDrawResult(result);
+        setWinnersContent(loadedWinnersContent);
         setLoadError('');
       } catch (error: unknown) {
         if (active) {
           setLoadError(
             error instanceof Error ? error.message : 'No se pudo cargar la campaña activa.',
           );
+        }
+      } finally {
+        if (active) {
+          setIsInitialLoading(false);
         }
       }
     };
@@ -495,16 +506,6 @@ function App() {
         setSellerSettings(null);
       });
   }, []);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setCountdown(computeCountdown(campaignEndIso));
-    }, 1000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [campaignEndIso]);
 
   useEffect(() => {
     const firstPackage = participationPackages[0];
@@ -550,6 +551,11 @@ function App() {
         reservedNumbers: result.reservedNumbers,
         buyer: buyerForm,
         quantity,
+        paymentMethods: sellerSettings?.paymentMethods ?? [],
+        ownerWhatsappNumber: extractWhatsappNumber(
+          sellerSettings?.whatsappUrl,
+          sellerSettings?.supportPhone,
+        ),
       });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error: unknown) {
@@ -568,6 +574,30 @@ function App() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
       />
+    );
+  }
+
+  // Show a loading screen until the real campaign data is ready, instead of
+  // flashing the default/mock content.
+  if (isInitialLoading) {
+    return (
+      <div className="oryum-page page-loading">
+        <div className="page-loading-inner" role="status" aria-live="polite">
+          <span className="page-loading-spinner" aria-hidden="true" />
+          <p>Cargando la campaña…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!raffle) {
+    return (
+      <div className="oryum-page page-loading">
+        <div className="page-loading-inner" role="status" aria-live="polite">
+          <h1>No hay campañas activas</h1>
+          <p>{loadError || 'Por ahora no hay eventos disponibles. Vuelve pronto.'}</p>
+        </div>
+      </div>
     );
   }
 
@@ -646,7 +676,7 @@ function App() {
                     <h2>{landing.purchaseTitle}</h2>
                     <p className="purchase-label">{landing.priceLabel}</p>
                     <p className="purchase-price">
-                      <span className="price-amount">{formatPriceDisplay(pricePerTicket)}</span>
+                      <span className="price-amount">{formatPriceDisplay(displayPurchasePrice)}</span>
                       <span className="price-currency">COP</span>
                     </p>
                   </header>
@@ -659,7 +689,7 @@ function App() {
                           {participationPackages.map((item) => {
                             const isSelected = quantity === item.quantity;
                             const label = item.label?.trim() || `${item.quantity} números`;
-                            const total = pricePerTicket * item.quantity;
+                            const total = getPackagePrice(item, pricePerTicket);
 
                             return (
                               <button
@@ -861,48 +891,6 @@ function App() {
             </aside>
 
             <div className="stats-card hero-stats" aria-label="Estado de la campaña">
-              <div className="stats-countdown">
-                <div className="countdown-block">
-                  <div className="countdown-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <circle cx="12" cy="13" r="8" stroke="currentColor" strokeWidth="1.8" />
-                      <path
-                        d="M12 9v4l3 2M9 3h6"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </div>
-                  <div className="countdown-content">
-                    <p className="countdown-title">La campaña cierra en:</p>
-                    <div className="countdown-grid">
-                      <div>
-                        <strong>{countdown.days}</strong>
-                        <small>DÍAS</small>
-                      </div>
-                      <span className="countdown-sep">:</span>
-                      <div>
-                        <strong>{countdown.hours}</strong>
-                        <small>HORAS</small>
-                      </div>
-                      <span className="countdown-sep">:</span>
-                      <div>
-                        <strong>{countdown.minutes}</strong>
-                        <small>MINUTOS</small>
-                      </div>
-                      <span className="countdown-sep">:</span>
-                      <div>
-                        <strong>{countdown.seconds}</strong>
-                        <small>SEGUNDOS</small>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="stats-divider" aria-hidden="true" />
-
               <div className="stats-progress">
                 <div className="progress-block">
                   <div className="progress-head">
@@ -1037,6 +1025,56 @@ function App() {
           ) : (
             <p className="muted">{landing.resultsPendingText}</p>
           )}
+
+          {winnersContent.gallery.length > 0 ? (
+            <section className="delivery-gallery" aria-label="Fotos de entregas">
+              <header className="section-head section-head-tight">
+                <h3>Entregas y momentos reales</h3>
+                <p>Fotos compartidas por la organización para mostrar transparencia y confianza.</p>
+              </header>
+              <div className="delivery-carousel" role="list">
+                {winnersContent.gallery.map((image) => (
+                  <article className="delivery-card" key={image.id} role="listitem">
+                    <img src={image.imageUrl} alt={image.title ?? 'Foto de entrega'} loading="lazy" />
+                    {(image.title || image.caption) ? (
+                      <div>
+                        {image.title ? <strong>{image.title}</strong> : null}
+                        {image.caption ? <p>{image.caption}</p> : null}
+                      </div>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {winnersContent.winners.length > 0 ? (
+            <section className="public-winners" aria-label="Ganadores destacados">
+              <header className="section-head section-head-tight">
+                <h3>Ganadores destacados</h3>
+                <p>Personas que ya participaron y fueron registradas como ganadoras.</p>
+              </header>
+              <div className="public-winners-grid">
+                {winnersContent.winners.map((winner) => (
+                  <article className="public-winner-card" key={winner.id}>
+                    {winner.winnerPhotoUrl ? (
+                      <img
+                        src={winner.winnerPhotoUrl}
+                        alt={`Foto de ${winner.winnerDisplayName ?? 'ganador'}`}
+                        loading="lazy"
+                      />
+                    ) : null}
+                    <div className="public-winner-body">
+                      <span>{winner.raffleTitle}</span>
+                      <strong>{winner.winnerDisplayName ?? 'Ganador verificado'}</strong>
+                      <p>Número ganador: {winner.winningNumber}</p>
+                      {winner.winnerComment ? <blockquote>{winner.winnerComment}</blockquote> : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
         </section>
       </main>
 
@@ -1173,6 +1211,20 @@ function App() {
                         strokeWidth="1.8"
                       />
                       <path d="M11 10l4 2-4 2v-4z" fill="currentColor" />
+                    </svg>
+                  ) : null}
+                  {link.icon === 'whatsapp' ? (
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path
+                        d="M12 3.5a8.5 8.5 0 00-7.3 12.8L3.5 20.5l4.4-1.1A8.5 8.5 0 1012 3.5z"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M9.2 8.2c.2-.5.4-.5.6-.5h.5c.2 0 .4 0 .6.5l.6 1.4c.1.2 0 .4 0 .5l-.4.5c-.1.2-.2.3 0 .6.3.5.7 1 1.2 1.3.5.3.7.3.9.2l.5-.4c.2-.2.4-.1.5-.1l1.3.6c.2.1.4.2.4.4 0 .5-.2 1.2-.7 1.5-.5.3-1.4.5-2.6 0-1.6-.6-3-2-3.8-3.6-.5-1-.4-1.8-.1-2.4z"
+                        fill="currentColor"
+                      />
                     </svg>
                   ) : null}
                 </a>

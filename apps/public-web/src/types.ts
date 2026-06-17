@@ -1,4 +1,4 @@
-import type { RaffleLandingConfig } from '@rifa/shared';
+import type { PaymentMethod, RaffleLandingConfig } from '@rifa/shared';
 
 export interface PublicRaffle {
   readonly id: string;
@@ -79,6 +79,10 @@ export interface CheckoutSession {
   readonly buyer: BuyerFormState;
 
   readonly quantity: number;
+
+  readonly paymentMethods?: readonly PaymentMethod[];
+
+  readonly ownerWhatsappNumber?: string;
 }
 
 export type PaymentFlowStep = 'pay' | 'proof' | 'done';
@@ -91,4 +95,33 @@ export interface CampaignStats {
   readonly availableTickets: number;
 
   readonly soldPercentage: number;
+}
+
+export interface PublicWinner {
+  readonly id: string;
+  readonly raffleId: string;
+  readonly raffleTitle: string;
+  readonly winningNumber: number;
+  readonly externalSource: string;
+  readonly registeredAt: string;
+  readonly winnerDisplayName: string | null;
+  readonly isPublicWinner: boolean;
+  readonly winnerPhotoUrl: string | null;
+  readonly winnerComment: string | null;
+  readonly displayOrder: number;
+}
+
+export interface PublicGalleryImage {
+  readonly id: string;
+  readonly imageUrl: string;
+  readonly title: string | null;
+  readonly caption: string | null;
+  readonly isPublic: boolean;
+  readonly displayOrder: number;
+  readonly createdAt: string;
+}
+
+export interface PublicWinnersContent {
+  readonly winners: readonly PublicWinner[];
+  readonly gallery: readonly PublicGalleryImage[];
 }

@@ -32,6 +32,34 @@ const localCampaignAssetPathSchema = z
     message: 'must be a URL or local asset path',
   });
 
+const optionalLocalAssetUrlSchema = localCampaignAssetPathSchema.optional().or(z.literal(''));
+
+export const paymentMethodSchema = z.object({
+  id: z.string().min(1).max(64),
+  label: z.string().min(1).max(80),
+  accountHolder: z.string().max(160).optional().or(z.literal('')),
+  accountType: z.string().max(80).optional().or(z.literal('')),
+  accountNumber: z.string().max(120).optional().or(z.literal('')),
+  documentNumber: z.string().max(120).optional().or(z.literal('')),
+  instructions: z.string().max(1000).optional().or(z.literal('')),
+  qrImageUrl: optionalLocalAssetUrlSchema,
+});
+
+export type PaymentMethodInput = z.infer<typeof paymentMethodSchema>;
+
+// Accepted upload formats. Phones (iPhone) frequently produce HEIC/HEIF; the
+// frontend compresses to JPEG/WebP before upload, but we accept the originals
+// as a safety net so large phone photos no longer fail silently.
+const uploadImageMimeTypeSchema = z.enum([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
+
+const uploadImageDataSchema = z.string().min(100).max(14_000_000);
+
 const adminRaffleFieldsSchema = z.object({
   title: z.string().min(3).max(160),
   slug: z
@@ -61,6 +89,7 @@ const adminRaffleFieldsSchema = z.object({
           z.object({
             label: z.string().max(80).optional(),
             quantity: z.coerce.number().int().min(1).max(100),
+            price: z.coerce.number().positive().optional(),
           }),
         )
         .max(12)
@@ -116,6 +145,7 @@ const adminRaffleFieldsSchema = z.object({
       instagramUrl: z.string().max(300).optional(),
       facebookUrl: z.string().max(300).optional(),
       youtubeUrl: z.string().max(300).optional(),
+      whatsappUrl: z.string().max(300).optional(),
       copyrightText: z.string().max(200).optional(),
     })
     .optional(),
@@ -152,6 +182,7 @@ export const sellerSettingsSchema = z.object({
   instagramUrl: z.string().max(300).optional(),
   facebookUrl: z.string().max(300).optional(),
   youtubeUrl: z.string().max(300).optional(),
+  whatsappUrl: z.string().max(300).optional(),
   footerBrandText: z.string().max(240).optional(),
   copyrightText: z.string().max(200).optional(),
   defaultPaymentMethodLabel: z.string().max(120).optional(),
@@ -160,22 +191,25 @@ export const sellerSettingsSchema = z.object({
   defaultPaymentAccountNumber: z.string().max(120).optional(),
   defaultPaymentDocumentNumber: z.string().max(120).optional(),
   defaultPaymentInstructions: z.string().max(1000).optional(),
-  defaultPaymentQrImageUrl: localCampaignAssetPathSchema.optional().or(z.literal('')),
+  defaultPaymentQrImageUrl: optionalLocalAssetUrlSchema,
+  paymentMethods: z.array(paymentMethodSchema).max(8).optional(),
 });
+
+export const MAX_RAFFLE_NUMBERS = 1_000_000;
 
 export const createAdminRaffleSchema = adminRaffleFieldsSchema.superRefine((value, context) => {
   if (value.numberMax < value.numberMin) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'numberMax must be greater than or equal to numberMin',
+      message: 'El número máximo debe ser mayor o igual que el número mínimo.',
       path: ['numberMax'],
     });
   }
 
-  if (value.numberMax - value.numberMin + 1 > 10_000) {
+  if (value.numberMax - value.numberMin + 1 > MAX_RAFFLE_NUMBERS) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'A raffle can create at most 10,000 numbers',
+      message: `La rifa puede tener como máximo ${MAX_RAFFLE_NUMBERS.toLocaleString('es-CO')} números.`,
       path: ['numberMax'],
     });
   }
@@ -234,11 +268,53 @@ export type CreatePublicOrderInput = z.infer<typeof createPublicOrderSchema>;
 
 export const uploadPaymentProofSchema = z.object({
   fileName: z.string().min(1).max(180),
-  mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
-  dataBase64: z.string().min(100).max(7_000_000),
+  mimeType: uploadImageMimeTypeSchema,
+  dataBase64: uploadImageDataSchema,
 });
 
 export type UploadPaymentProofInput = z.infer<typeof uploadPaymentProofSchema>;
+
+export const createManualOrderSchema = z
+  .object({
+    raffleId: z.string().min(1).optional(),
+    fullName: z.string().min(3).max(160),
+    documentType: z.string().max(40).optional(),
+    documentNumber: z.string().min(4).max(80),
+    email: z.string().email().max(160),
+    phone: z.string().min(6).max(60),
+    city: z.string().max(120).optional(),
+    numbersRequested: z.coerce.number().int().min(1).max(100).optional(),
+    selectedNumbers: z.array(z.coerce.number().int().min(0)).max(100).optional(),
+    proof: z
+      .object({
+        fileName: z.string().min(1).max(180),
+        mimeType: uploadImageMimeTypeSchema,
+        dataBase64: uploadImageDataSchema,
+      })
+      .optional(),
+  })
+  .superRefine((value, context) => {
+    if (!value.numbersRequested && !value.selectedNumbers?.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'numbersRequested or selectedNumbers is required',
+        path: ['numbersRequested'],
+      });
+    }
+
+    if (
+      value.selectedNumbers &&
+      new Set(value.selectedNumbers).size !== value.selectedNumbers.length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'selectedNumbers cannot contain duplicates',
+        path: ['selectedNumbers'],
+      });
+    }
+  });
+
+export type CreateManualOrderInput = z.infer<typeof createManualOrderSchema>;
 
 export const rejectAdminOrderSchema = z.object({
   reason: z.string().min(3).max(500),
@@ -271,8 +347,8 @@ export const manualProofReviewSchema = z.object({
 
 export const uploadCampaignImageSchema = z.object({
   fileName: z.string().min(1).max(180),
-  mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
-  dataBase64: z.string().min(100).max(7_000_000),
+  mimeType: uploadImageMimeTypeSchema,
+  dataBase64: uploadImageDataSchema,
 });
 
 export const uploadCampaignCoverSchema = uploadCampaignImageSchema;
@@ -287,6 +363,31 @@ export const registerDrawResultSchema = z.object({
 });
 
 export type RegisterDrawResultInput = z.infer<typeof registerDrawResultSchema>;
+
+export const updateWinnerSchema = z.object({
+  isPublicWinner: z.boolean().optional(),
+  winnerComment: z.string().max(800).nullable().optional(),
+  displayOrder: z.coerce.number().int().min(0).optional(),
+});
+
+export const createGalleryImageSchema = z.object({
+  title: z.string().max(120).optional(),
+  caption: z.string().max(500).optional(),
+  isPublic: z.boolean().optional(),
+  displayOrder: z.coerce.number().int().min(0).optional(),
+  image: uploadCampaignImageSchema,
+});
+
+export const updateGalleryImageSchema = z.object({
+  title: z.string().max(120).nullable().optional(),
+  caption: z.string().max(500).nullable().optional(),
+  isPublic: z.boolean().optional(),
+  displayOrder: z.coerce.number().int().min(0).optional(),
+});
+
+export type UpdateWinnerInput = z.infer<typeof updateWinnerSchema>;
+export type CreateGalleryImageInput = z.infer<typeof createGalleryImageSchema>;
+export type UpdateGalleryImageInput = z.infer<typeof updateGalleryImageSchema>;
 
 export const createPrizeSchema = z.object({
   title: z.string().min(2).max(160),

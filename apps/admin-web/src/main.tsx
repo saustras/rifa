@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { AdminShell } from './components/AdminShell';
@@ -18,6 +18,7 @@ import { NumbersPage } from './pages/NumbersPage';
 import { OrdersPage } from './pages/OrdersPage';
 import { ParticipantsPage } from './pages/ParticipantsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { WinnersPage } from './pages/WinnersPage';
 import {
   REQUEST_STATUS,
   type AdminCustomer,
@@ -51,6 +52,16 @@ const getInitialAdminRoute = (): InitialAdminRoute => {
 
 const INITIAL_ADMIN_ROUTE = getInitialAdminRoute();
 
+const formatSseAmount = (amount: string): string => {
+  const parsedAmount = Number(amount);
+
+  if (!Number.isFinite(parsedAmount)) {
+    return '0';
+  }
+
+  return new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(parsedAmount);
+};
+
 function App() {
   const [session, setSession] = useState<AdminSession | null>(getStoredSession);
   const [loginUsername, setLoginUsername] = useState('admin');
@@ -66,6 +77,8 @@ function App() {
   const [ordersStatus, setOrdersStatus] = useState<RequestStatus>(REQUEST_STATUS.loading);
   const [rafflesStatus, setRafflesStatus] = useState<RequestStatus>(REQUEST_STATUS.loading);
   const [message, setMessage] = useState<string>('');
+  const [sseNotification, setSseNotification] = useState<string>('');
+  const sseSourceRef = useRef<EventSource | null>(null);
 
   const loadData = useCallback(async (): Promise<void> => {
     if (!session) {
@@ -102,6 +115,127 @@ function App() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  // Keep a stable reference to the latest loadData so SSE handlers can refresh
+  // without forcing the connection to be torn down and re-created.
+  const loadDataRef = useRef(loadData);
+  useEffect(() => {
+    loadDataRef.current = loadData;
+  }, [loadData]);
+
+  useEffect(() => {
+    if (!session) {
+      if (sseSourceRef.current) {
+        sseSourceRef.current.close();
+        sseSourceRef.current = null;
+      }
+      return;
+    }
+
+    const apiBase = import.meta.env.VITE_API_BASE_URL ?? '';
+    const sseUrl = `${apiBase}/api/admin/events?token=${encodeURIComponent(session.token)}`;
+
+    let isCancelled = false;
+    let reconnectTimer: number | undefined;
+    let reconnectDelay = 2000;
+    const MAX_RECONNECT_DELAY = 30000;
+
+    // Refresh the orders list whenever the server reports a change. A short
+    // debounce coalesces bursts (e.g. proof + review in quick succession).
+    let refreshTimer: number | undefined;
+    const scheduleRefresh = () => {
+      if (refreshTimer) {
+        window.clearTimeout(refreshTimer);
+      }
+      refreshTimer = window.setTimeout(() => {
+        void loadDataRef.current();
+      }, 400);
+    };
+
+    const connect = () => {
+      if (isCancelled) {
+        return;
+      }
+
+      const source = new EventSource(sseUrl);
+      sseSourceRef.current = source;
+
+      source.addEventListener('new_order', (event) => {
+        try {
+          const payload = JSON.parse(event.data) as { readonly amount?: string };
+          setSseNotification(`Nueva orden por ${formatSseAmount(payload.amount ?? '0')} COP`);
+        } catch {
+          setSseNotification('Nueva orden recibida');
+        }
+        scheduleRefresh();
+      });
+
+      source.addEventListener('order_proof', () => {
+        setSseNotification('Nuevo comprobante recibido');
+        scheduleRefresh();
+      });
+
+      source.addEventListener('order_reviewed', () => {
+        scheduleRefresh();
+      });
+
+      source.addEventListener('connected', () => {
+        // Connection established: reset the backoff.
+        reconnectDelay = 2000;
+      });
+
+      source.onerror = () => {
+        source.close();
+
+        if (sseSourceRef.current === source) {
+          sseSourceRef.current = null;
+        }
+
+        if (isCancelled) {
+          return;
+        }
+
+        // Auto-reconnect with capped exponential backoff.
+        reconnectTimer = window.setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+          connect();
+        }, reconnectDelay);
+      };
+    };
+
+    connect();
+
+    return () => {
+      isCancelled = true;
+
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+      }
+
+      if (refreshTimer) {
+        window.clearTimeout(refreshTimer);
+      }
+
+      if (sseSourceRef.current) {
+        sseSourceRef.current.close();
+        sseSourceRef.current = null;
+      }
+    };
+  }, [session]);
+
+  useEffect(() => {
+    if (!sseNotification) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setSseNotification('');
+    }, 6000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [sseNotification]);
 
   const handleLoginSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -202,6 +336,7 @@ function App() {
           <OrdersPage
             credentials={credentials}
             orders={orders}
+            raffles={raffles}
             ordersStatus={ordersStatus}
             focusedOrderId={focusedOrderId}
             onRefresh={() => void loadData()}
@@ -211,7 +346,9 @@ function App() {
           />
         );
       case 'participants':
-        return <ParticipantsPage customers={customers} />;
+        return <ParticipantsPage credentials={credentials} customers={customers} />;
+      case 'winners':
+        return <WinnersPage credentials={credentials} />;
       case 'numbers':
         return <NumbersPage credentials={credentials} raffles={raffles} />;
       case 'settings':
@@ -290,6 +427,21 @@ function App() {
         <p className="alert" role="status">
           {message}
         </p>
+      ) : null}
+      {sseNotification ? (
+        <div className="sse-toast" role="status">
+          <span>{sseNotification}</span>
+          <button
+            type="button"
+            className="sse-toast-close"
+            aria-label="Cerrar notificación"
+            onClick={() => {
+              setSseNotification('');
+            }}
+          >
+            ×
+          </button>
+        </div>
       ) : null}
       {renderPage()}
     </AdminShell>

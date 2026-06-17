@@ -7,17 +7,23 @@ import {
   activateSellerRaffle,
   approveSellerOrder,
   attachPaymentProofToOrder,
-  blockSellerRaffleNumber,
+  blockSellerRaffleNumberByValue,
+  createManualSellerOrder,
+  createSellerDeliveryGalleryImage,
   createPublicOrderForRaffle,
   createSellerRaffle,
   createSellerRafflePrize,
+  deleteSellerDeliveryGalleryImage,
   deleteSellerRafflePrize,
   ensureLocalSchema,
   getPublicActiveRaffleBySlug,
   getPublicCurrentActiveRaffle,
   getPublicDrawResultBySlug,
   getPublicOrderStatus,
+  getPublicRaffleStatsBySlug,
+  getPublicWinnersContentBySlug,
   getLocalDatabaseHealth,
+  getCustomerDetail,
   getSellerActiveRaffle,
   getSellerDrawResult,
   getSellerSettings,
@@ -28,10 +34,13 @@ import {
   listSellerCustomers,
   listSellerNotificationLogs,
   listSellerOrders,
+  listSellerDeliveryGallery,
   listSellerRaffleNumbers,
   listSellerRaffleOrdersForExport,
   listSellerRafflePrizes,
   listSellerRaffles,
+  listSellerWinners,
+  persistCampaignAssetImage,
   persistCampaignCoverImage,
   persistCampaignPaymentQrImage,
   registerSellerDrawResult,
@@ -40,25 +49,32 @@ import {
   upsertNotificationLog,
   updateSellerRaffle,
   updateSellerDefaultPaymentQrImage,
+  updateSellerDeliveryGalleryImage,
   updateSellerSettings,
   updateSellerRaffleCoverImage,
   updateSellerRafflePaymentQrImage,
   updateSellerRafflePrize,
+  updateSellerWinner,
   createRifaDatabase,
 } from '@rifa/db';
 import { NOTIFICATION_CHANNELS, NOTIFICATION_JOB_STATUSES, NOTIFICATION_TYPES } from '@rifa/shared';
 import {
   createAdminRaffleSchema,
+  createManualOrderSchema,
+  createGalleryImageSchema,
   createPrizeSchema,
   createPublicOrderSchema,
   registerDrawResultSchema,
   rejectAdminOrderSchema,
   updateAdminRaffleSchema,
+  updateGalleryImageSchema,
   updatePrizeSchema,
+  updateWinnerSchema,
   sellerSettingsSchema,
   uploadCampaignImageSchema,
   uploadPaymentProofSchema,
 } from '@rifa/validation';
+import { broadcastToSeller, registerSseClient } from './sse-bus';
 import nodemailer from 'nodemailer';
 import sharp from 'sharp';
 
@@ -90,6 +106,13 @@ interface ErrorResponse {
 
 interface AdminContext {
   readonly sellerId: string;
+}
+
+interface ManualOrderProof {
+  readonly proofUrl: string;
+  readonly storageKey: string;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
 }
 
 interface TelegramInlineKeyboardButton {
@@ -396,6 +419,171 @@ const compressCampaignCover = async (
   };
 };
 
+const BACKGROUND_SAMPLE_SIZE = 24;
+const BACKGROUND_UNIFORM_DISTANCE = 42;
+const BACKGROUND_TRANSPARENT_DISTANCE = 32;
+const BACKGROUND_FEATHER_DISTANCE = 78;
+const BACKGROUND_MIN_LIGHTNESS = 185;
+
+interface RgbColor {
+  readonly red: number;
+  readonly green: number;
+  readonly blue: number;
+}
+
+const getPixelOffset = (x: number, y: number, width: number, channels: number): number =>
+  (y * width + x) * channels;
+
+const getColorDistance = (left: RgbColor, right: RgbColor): number => {
+  const redDelta = left.red - right.red;
+  const greenDelta = left.green - right.green;
+  const blueDelta = left.blue - right.blue;
+
+  return Math.sqrt(redDelta * redDelta + greenDelta * greenDelta + blueDelta * blueDelta);
+};
+
+const getLightness = (color: RgbColor): number =>
+  color.red * 0.2126 + color.green * 0.7152 + color.blue * 0.0722;
+
+const getAverageCornerColor = (
+  data: Buffer,
+  width: number,
+  height: number,
+  channels: number,
+  startX: number,
+  startY: number,
+): RgbColor => {
+  const sampleWidth = Math.min(BACKGROUND_SAMPLE_SIZE, width);
+  const sampleHeight = Math.min(BACKGROUND_SAMPLE_SIZE, height);
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  let samples = 0;
+
+  for (let y = startY; y < startY + sampleHeight; y += 1) {
+    for (let x = startX; x < startX + sampleWidth; x += 1) {
+      const offset = getPixelOffset(x, y, width, channels);
+      const alpha = data[offset + 3] ?? 255;
+
+      if (alpha < 16) {
+        continue;
+      }
+
+      red += data[offset] ?? 0;
+      green += data[offset + 1] ?? 0;
+      blue += data[offset + 2] ?? 0;
+      samples += 1;
+    }
+  }
+
+  if (samples === 0) {
+    return { red: 255, green: 255, blue: 255 };
+  }
+
+  return {
+    red: red / samples,
+    green: green / samples,
+    blue: blue / samples,
+  };
+};
+
+const getDetectedBackgroundColor = (
+  data: Buffer,
+  width: number,
+  height: number,
+  channels: number,
+): RgbColor | undefined => {
+  const sampleWidth = Math.min(BACKGROUND_SAMPLE_SIZE, width);
+  const sampleHeight = Math.min(BACKGROUND_SAMPLE_SIZE, height);
+  const corners = [
+    getAverageCornerColor(data, width, height, channels, 0, 0),
+    getAverageCornerColor(data, width, height, channels, width - sampleWidth, 0),
+    getAverageCornerColor(data, width, height, channels, 0, height - sampleHeight),
+    getAverageCornerColor(
+      data,
+      width,
+      height,
+      channels,
+      width - sampleWidth,
+      height - sampleHeight,
+    ),
+  ];
+
+  const background = {
+    red: corners.reduce((sum, color) => sum + color.red, 0) / corners.length,
+    green: corners.reduce((sum, color) => sum + color.green, 0) / corners.length,
+    blue: corners.reduce((sum, color) => sum + color.blue, 0) / corners.length,
+  };
+  const isUniform = corners.every(
+    (corner) => getColorDistance(corner, background) <= BACKGROUND_UNIFORM_DISTANCE,
+  );
+
+  if (!isUniform || getLightness(background) < BACKGROUND_MIN_LIGHTNESS) {
+    return undefined;
+  }
+
+  return background;
+};
+
+const removeLightBackgroundFromCampaignCover = async (input: Buffer): Promise<Buffer> => {
+  const { data, info } = await sharp(input, { limitInputPixels: 16_000_000 })
+    .rotate()
+    .resize({
+      width: 1600,
+      height: 1600,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const background = getDetectedBackgroundColor(data, info.width, info.height, info.channels);
+
+  if (!background) {
+    return sharp(data, {
+      raw: {
+        width: info.width,
+        height: info.height,
+        channels: info.channels,
+      },
+    })
+      .png({ quality: 92, compressionLevel: 9 })
+      .toBuffer();
+  }
+
+  for (let offset = 0; offset < data.length; offset += info.channels) {
+    const current = {
+      red: data[offset] ?? 0,
+      green: data[offset + 1] ?? 0,
+      blue: data[offset + 2] ?? 0,
+    };
+    const distance = getColorDistance(current, background);
+
+    if (distance <= BACKGROUND_TRANSPARENT_DISTANCE) {
+      data[offset + 3] = 0;
+      continue;
+    }
+
+    if (distance <= BACKGROUND_FEATHER_DISTANCE) {
+      const alphaRatio =
+        (distance - BACKGROUND_TRANSPARENT_DISTANCE) /
+        (BACKGROUND_FEATHER_DISTANCE - BACKGROUND_TRANSPARENT_DISTANCE);
+      const currentAlpha = data[offset + 3] ?? 255;
+      data[offset + 3] = Math.min(255, Math.round(currentAlpha * alphaRatio));
+    }
+  }
+
+  return sharp(data, {
+    raw: {
+      width: info.width,
+      height: info.height,
+      channels: info.channels,
+    },
+  })
+    .png({ quality: 92, compressionLevel: 9 })
+    .toBuffer();
+};
+
 const isConfiguredSecret = (value: string | undefined): value is string => {
   const trimmed = value?.trim();
 
@@ -540,6 +728,13 @@ const buildBuyerOrderEmailContent = (
   const customerName = detail.customer.fullName;
   const greeting = `Hola ${customerName},`;
 
+  const orderedNumbers = detail.numbers
+    .map((item) => item.displayNumber)
+    .sort();
+  const numbersLine = orderedNumbers.length > 0
+    ? `Números: ${orderedNumbers.join(', ')}`
+    : '';
+
   if (type === NOTIFICATION_TYPES.orderApproved) {
     const subject = `Pago aprobado - ${raffleTitle}`;
     const text = [
@@ -547,10 +742,14 @@ const buildBuyerOrderEmailContent = (
       '',
       `Tu pago y orden fueron aprobados para la rifa "${raffleTitle}".`,
       `ID de orden: ${orderId}`,
+      ...(numbersLine ? ['', numbersLine] : []),
       '',
       'Gracias por participar. Conserva este correo como confirmación.',
     ].join('\n');
-    const html = `<p>${escapeHtml(greeting)}</p><p>Tu pago y orden fueron <strong>aprobados</strong> para la rifa <strong>${escapeHtml(raffleTitle)}</strong>.</p><p>ID de orden: <strong>${escapeHtml(orderId)}</strong></p><p>Gracias por participar. Conserva este correo como confirmación.</p>`;
+    const htmlNumbers = numbersLine
+      ? `<p>Tus números: <strong>${escapeHtml(orderedNumbers.join(', '))}</strong></p>`
+      : '';
+    const html = `<p>${escapeHtml(greeting)}</p><p>Tu pago y orden fueron <strong>aprobados</strong> para la rifa <strong>${escapeHtml(raffleTitle)}</strong>.</p><p>ID de orden: <strong>${escapeHtml(orderId)}</strong></p>${htmlNumbers}<p>Gracias por participar. Conserva este correo como confirmación.</p>`;
 
     return { subject, text, html };
   }
@@ -873,6 +1072,77 @@ const isAdminLoginBody = (value: unknown): value is AdminLoginBody =>
   'password' in value &&
   typeof value.password === 'string';
 
+const getQueryParam = (url: string, paramName: string): string | undefined => {
+  const searchStart = url.indexOf('?');
+  if (searchStart === -1) {
+    return undefined;
+  }
+  const searchParams = new URLSearchParams(url.slice(searchStart));
+  const value = searchParams.get(paramName);
+  return value ?? undefined;
+};
+
+const handleAdminSse = async (
+  request: IncomingMessage,
+  response: ServerResponse,
+  pathname: string,
+): Promise<boolean> => {
+  if (pathname !== '/api/admin/events' || request.method !== 'GET') {
+    return false;
+  }
+
+  const tokenFromQuery = request.url ? getQueryParam(request.url, 'token') : undefined;
+  const bearerToken = getBearerToken(request);
+  const effectiveToken = bearerToken ?? tokenFromQuery;
+
+  if (!effectiveToken) {
+    sendJson(response, 401, {
+      error: 'unauthorized',
+      message: 'Token is required for admin SSE.',
+    });
+    return true;
+  }
+
+  const payload = verifyAdminToken(effectiveToken);
+  if (!payload) {
+    sendJson(response, 401, {
+      error: 'unauthorized',
+      message: 'Invalid or expired admin token.',
+    });
+    return true;
+  }
+
+  const sellerId = payload.sellerId;
+
+  response.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache',
+    'connection': 'keep-alive',
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, OPTIONS',
+    'access-control-allow-headers': 'authorization',
+    'x-accel-buffering': 'no',
+  });
+
+  response.write(`event: connected\ndata: ${JSON.stringify({ sellerId })}\n\n`);
+
+  registerSseClient(sellerId, response);
+
+  const keepAlive = setInterval(() => {
+    try {
+      response.write(':keepalive\n\n');
+    } catch {
+      clearInterval(keepAlive);
+    }
+  }, 25_000);
+
+  response.on('close', () => {
+    clearInterval(keepAlive);
+  });
+
+  return true;
+};
+
 const handleAdminAuth = async (
   request: IncomingMessage,
   response: ServerResponse,
@@ -1033,6 +1303,37 @@ const handleAdminSettings = async (
     return true;
   }
 
+  // Uploads a QR for one of the seller's global payment methods. Returns the
+  // stored URL only; the admin stores it inside the corresponding method and
+  // saves the whole settings payload via PATCH /api/admin/settings.
+  if (pathname === '/api/admin/settings/payment-method-qr' && request.method === 'POST') {
+    const parsed = uploadCampaignImageSchema.safeParse(await readJsonBody(request));
+
+    if (!parsed.success) {
+      sendJson(response, 400, toValidationErrorResponse(parsed.error));
+      return true;
+    }
+
+    try {
+      const inputImage = decodeBase64Image(parsed.data.dataBase64);
+      const compressed = await compressCampaignCover(inputImage, parsed.data.mimeType);
+      const qrImageUrl = await persistCampaignPaymentQrImage(
+        `method-${adminContext.sellerId}`,
+        compressed.buffer,
+        compressed.mimeType,
+      );
+
+      sendJson(response, 200, { data: { qrImageUrl } });
+    } catch (error: unknown) {
+      sendJson(response, 400, {
+        error: 'invalid_payment_qr_image',
+        message: toSafeErrorMessage(error),
+      });
+    }
+
+    return true;
+  }
+
   sendJson(response, 404, { error: 'not_found', path: pathname });
   return true;
 };
@@ -1052,15 +1353,19 @@ const toValidationErrorResponse = (error: FlattenableValidationError): ErrorResp
 const sendPublicOrderError = (response: ServerResponse, error: unknown, pathname: string): void => {
   const message = toSafeErrorMessage(error);
 
-  if (message.includes('no longer available')) {
+  if (message.includes('no longer available') || message.includes('Not enough available')) {
     sendJson(response, 409, {
       error: 'number_conflict',
-      message,
+      message: 'No hay suficientes números disponibles. Intenta con una cantidad menor.',
     });
     return;
   }
 
-  if (message.includes('required') || message.includes('not allowed')) {
+  if (
+    message.includes('required') ||
+    message.includes('not allowed') ||
+    message.includes('out of range')
+  ) {
     sendJson(response, 400, {
       error: 'invalid_order_request',
       message,
@@ -1224,11 +1529,11 @@ const handleAdminRaffles = async (
 
     try {
       const inputImage = decodeBase64Image(parsed.data.dataBase64);
-      const compressed = await compressCampaignCover(inputImage, parsed.data.mimeType);
+      const coverImage = await removeLightBackgroundFromCampaignCover(inputImage);
       const coverImageUrl = await persistCampaignCoverImage(
         raffleId,
-        compressed.buffer,
-        compressed.mimeType,
+        coverImage,
+        'image/png',
       );
       const updated = await updateSellerRaffleCoverImage({
         sellerId: adminContext.sellerId,
@@ -1483,6 +1788,193 @@ const handleAdminRaffles = async (
   return true;
 };
 
+const handleAdminWinners = async (
+  request: IncomingMessage,
+  response: ServerResponse,
+  pathname: string,
+): Promise<boolean> => {
+  const segments = getSegments(pathname);
+
+  if (segments[0] !== 'api' || segments[1] !== 'admin') {
+    return false;
+  }
+
+  const isWinnersRoute = segments[2] === 'winners';
+  const isGalleryRoute = segments[2] === 'delivery-gallery';
+
+  if (!isWinnersRoute && !isGalleryRoute) {
+    return false;
+  }
+
+  const adminContext = authorizeAdmin(request);
+
+  if (isErrorResponse(adminContext)) {
+    sendJson(response, 401, adminContext);
+    return true;
+  }
+
+  if (isWinnersRoute) {
+    const winnerId = segments[3];
+
+    if (request.method === 'GET' && !winnerId) {
+      const data = await listSellerWinners(adminContext.sellerId);
+      sendJson(response, 200, { data });
+      return true;
+    }
+
+    if (request.method === 'PATCH' && winnerId) {
+      const parsed = updateWinnerSchema.safeParse(await readJsonBody(request));
+
+      if (!parsed.success) {
+        sendJson(response, 400, toValidationErrorResponse(parsed.error));
+        return true;
+      }
+
+      const data = await updateSellerWinner({
+        sellerId: adminContext.sellerId,
+        winnerId,
+        ...parsed.data,
+      });
+
+      if (!data) {
+        sendJson(response, 404, { error: 'not_found', path: pathname });
+        return true;
+      }
+
+      sendJson(response, 200, { data });
+      return true;
+    }
+
+    if (request.method === 'POST' && winnerId && segments[4] === 'photo') {
+      const parsed = uploadCampaignImageSchema.safeParse(await readJsonBody(request));
+
+      if (!parsed.success) {
+        sendJson(response, 400, toValidationErrorResponse(parsed.error));
+        return true;
+      }
+
+      try {
+        const inputImage = decodeBase64Image(parsed.data.dataBase64);
+        const compressed = await compressCampaignCover(inputImage, parsed.data.mimeType);
+        const winnerPhotoUrl = await persistCampaignAssetImage(
+          winnerId,
+          compressed.buffer,
+          compressed.mimeType,
+          'winner',
+        );
+        const data = await updateSellerWinner({
+          sellerId: adminContext.sellerId,
+          winnerId,
+          winnerPhotoUrl,
+        });
+
+        if (!data) {
+          sendJson(response, 404, { error: 'not_found', path: pathname });
+          return true;
+        }
+
+        sendJson(response, 200, { data });
+      } catch (error: unknown) {
+        sendJson(response, 400, {
+          error: 'invalid_winner_photo',
+          message: toSafeErrorMessage(error),
+        });
+      }
+
+      return true;
+    }
+
+    sendJson(response, 405, { error: 'method_not_allowed', path: pathname });
+    return true;
+  }
+
+  const imageId = segments[3];
+
+  if (request.method === 'GET' && !imageId) {
+    const data = await listSellerDeliveryGallery(adminContext.sellerId);
+    sendJson(response, 200, { data });
+    return true;
+  }
+
+  if (request.method === 'POST' && !imageId) {
+    const parsed = createGalleryImageSchema.safeParse(await readJsonBody(request));
+
+    if (!parsed.success) {
+      sendJson(response, 400, toValidationErrorResponse(parsed.error));
+      return true;
+    }
+
+    try {
+      const inputImage = decodeBase64Image(parsed.data.image.dataBase64);
+      const compressed = await compressCampaignCover(inputImage, parsed.data.image.mimeType);
+      const imageUrl = await persistCampaignAssetImage(
+        adminContext.sellerId,
+        compressed.buffer,
+        compressed.mimeType,
+        'gallery',
+      );
+      const data = await createSellerDeliveryGalleryImage({
+        sellerId: adminContext.sellerId,
+        imageUrl,
+        title: parsed.data.title,
+        caption: parsed.data.caption,
+        isPublic: parsed.data.isPublic,
+        displayOrder: parsed.data.displayOrder,
+      });
+
+      sendJson(response, 201, { data });
+    } catch (error: unknown) {
+      sendJson(response, 400, {
+        error: 'invalid_gallery_image',
+        message: toSafeErrorMessage(error),
+      });
+    }
+
+    return true;
+  }
+
+  if (request.method === 'PATCH' && imageId) {
+    const parsed = updateGalleryImageSchema.safeParse(await readJsonBody(request));
+
+    if (!parsed.success) {
+      sendJson(response, 400, toValidationErrorResponse(parsed.error));
+      return true;
+    }
+
+    const data = await updateSellerDeliveryGalleryImage({
+      sellerId: adminContext.sellerId,
+      imageId,
+      ...parsed.data,
+    });
+
+    if (!data) {
+      sendJson(response, 404, { error: 'not_found', path: pathname });
+      return true;
+    }
+
+    sendJson(response, 200, { data });
+    return true;
+  }
+
+  if (request.method === 'DELETE' && imageId) {
+    const ok = await deleteSellerDeliveryGalleryImage({
+      sellerId: adminContext.sellerId,
+      imageId,
+    });
+
+    if (!ok) {
+      sendJson(response, 404, { error: 'not_found', path: pathname });
+      return true;
+    }
+
+    sendJson(response, 200, { data: { ok: true } });
+    return true;
+  }
+
+  sendJson(response, 405, { error: 'method_not_allowed', path: pathname });
+  return true;
+};
+
 const handleAdminOrders = async (
   request: IncomingMessage,
   response: ServerResponse,
@@ -1514,6 +2006,10 @@ const handleAdminOrders = async (
 
       sendJson(response, 200, { data });
       void notifyBuyerOrderEmail(data, NOTIFICATION_TYPES.orderApproved);
+      broadcastToSeller(adminContext.sellerId, {
+        type: 'order_reviewed',
+        data: { orderId, status: data.order.status },
+      });
       return true;
     } catch (error: unknown) {
       sendAdminReviewError(response, error);
@@ -1543,9 +2039,86 @@ const handleAdminOrders = async (
 
       sendJson(response, 200, { data });
       void notifyBuyerOrderEmail(data, NOTIFICATION_TYPES.orderRejected);
+      broadcastToSeller(adminContext.sellerId, {
+        type: 'order_reviewed',
+        data: { orderId, status: data.order.status },
+      });
       return true;
     } catch (error: unknown) {
       sendAdminReviewError(response, error);
+      return true;
+    }
+  }
+
+  if (request.method === 'POST' && orderId === 'manual' && segments.length === 4) {
+    const parsed = createManualOrderSchema.safeParse(await readJsonBody(request));
+
+    if (!parsed.success) {
+      sendJson(response, 400, toValidationErrorResponse(parsed.error));
+      return true;
+    }
+
+    let proof: ManualOrderProof | undefined;
+
+    if (parsed.data.proof) {
+      try {
+        const inputImage = decodeBase64Image(parsed.data.proof.dataBase64);
+        const compressedImage = await compressPaymentProof(inputImage);
+        const persisted = await persistCompressedProof(`manual-${Date.now()}`, compressedImage);
+        proof = {
+          proofUrl: persisted.proofUrl,
+          storageKey: persisted.storageKey,
+          mimeType: COMPRESSED_PROOF_MIME_TYPE,
+          sizeBytes: compressedImage.byteLength,
+        };
+      } catch (error: unknown) {
+        sendJson(response, 400, {
+          error: 'invalid_proof_image',
+          message: toSafeErrorMessage(error),
+        });
+        return true;
+      }
+    }
+
+    try {
+      const { proof: _ignoredProof, ...orderFields } = parsed.data;
+      void _ignoredProof;
+      const data = await createManualSellerOrder({
+        sellerId: adminContext.sellerId,
+        ...orderFields,
+        ...(proof ? { proof } : {}),
+      });
+
+      if (!data) {
+        sendJson(response, 404, {
+          error: 'not_found',
+          message: 'No hay una campaña activa para registrar la compra.',
+          path: pathname,
+        });
+        return true;
+      }
+
+      sendJson(response, 201, { data });
+      void notifyBuyerOrderEmail(data, NOTIFICATION_TYPES.orderApproved);
+      broadcastToSeller(adminContext.sellerId, {
+        type: 'new_order',
+        data: {
+          orderId: data.order.id,
+          numbersRequested: data.order.numbersRequested,
+          amount: data.order.amount,
+          currency: data.order.currency,
+        },
+      });
+      return true;
+    } catch (error: unknown) {
+      const message = toSafeErrorMessage(error);
+
+      if (message.includes('no longer available') || message.includes('Not enough available')) {
+        sendJson(response, 409, { error: 'number_conflict', message });
+        return true;
+      }
+
+      sendJson(response, 400, { error: 'manual_order_failed', message });
       return true;
     }
   }
@@ -1675,21 +2248,39 @@ const handleAdminNumbers = async (
     return true;
   }
 
-  if (request.method !== 'POST' || !raffleNumberId || !action) {
+  if (request.method !== 'POST') {
     sendJson(response, 405, { error: 'method_not_allowed', path: pathname });
     return true;
   }
 
-  if (action === 'block') {
-    const ok = await blockSellerRaffleNumber({
+  // Block a number by value (lazy model: blocking creates a row).
+  // POST /api/admin/numbers/block  body: { raffleId, number }
+  if (raffleNumberId === 'block' && !action) {
+    const body = (await readJsonBody(request)) as {
+      readonly raffleId?: unknown;
+      readonly number?: unknown;
+    };
+    const raffleId = typeof body.raffleId === 'string' ? body.raffleId : '';
+    const numberValue = Number(body.number);
+
+    if (!raffleId || !Number.isInteger(numberValue)) {
+      sendJson(response, 400, {
+        error: 'invalid_block_request',
+        message: 'raffleId y number son requeridos.',
+      });
+      return true;
+    }
+
+    const ok = await blockSellerRaffleNumberByValue({
       sellerId: adminContext.sellerId,
-      raffleNumberId,
+      raffleId,
+      number: numberValue,
     });
     sendJson(response, ok ? 200 : 409, { data: { ok } });
     return true;
   }
 
-  if (action === 'release') {
+  if (raffleNumberId && action === 'release') {
     const ok = await releaseSellerRaffleNumber({
       sellerId: adminContext.sellerId,
       raffleNumberId,
@@ -1714,6 +2305,8 @@ const handleAdminInsights = async (
   }
 
   const resource = segments[2];
+  const resourceId = segments[3];
+  const resourceAction = segments[4];
   const allowedResources = new Set(['customers', 'audit-logs', 'notifications']);
 
   if (!resource || !allowedResources.has(resource)) {
@@ -1729,6 +2322,21 @@ const handleAdminInsights = async (
 
   if (request.method !== 'GET') {
     sendJson(response, 405, { error: 'method_not_allowed', path: pathname });
+    return true;
+  }
+
+  if (resource === 'customers' && resourceId && resourceAction === 'detail') {
+    const data = await getCustomerDetail({
+      sellerId: adminContext.sellerId,
+      customerId: resourceId,
+    });
+
+    if (!data) {
+      sendJson(response, 404, { error: 'not_found', path: pathname });
+      return true;
+    }
+
+    sendJson(response, 200, { data });
     return true;
   }
 
@@ -1815,6 +2423,16 @@ const handlePublicRaffles = async (
         return true;
       }
 
+      void broadcastToSeller(data.order.sellerId, {
+        type: 'new_order',
+        data: {
+          orderId: data.order.id,
+          numbersRequested: data.order.numbersRequested,
+          amount: data.order.amount,
+          currency: data.order.currency,
+        },
+      });
+
       sendJson(response, 201, { data });
       return true;
     }
@@ -1842,8 +2460,36 @@ const handlePublicRaffles = async (
     return true;
   }
 
+  if (segments[4] === 'stats') {
+    const data = await getPublicRaffleStatsBySlug(slug);
+
+    if (!data) {
+      sendJson(response, 404, {
+        error: 'not_found',
+        message: 'Esta campaña no está disponible.',
+        path: pathname,
+      });
+      return true;
+    }
+
+    sendJson(response, 200, { data });
+    return true;
+  }
+
   if (segments[4] === 'result') {
     const data = await getPublicDrawResultBySlug(slug);
+
+    if (!data) {
+      sendJson(response, 404, { error: 'not_found', path: pathname });
+      return true;
+    }
+
+    sendJson(response, 200, { data });
+    return true;
+  }
+
+  if (segments[4] === 'winners-content') {
+    const data = await getPublicWinnersContentBySlug(slug);
 
     if (!data) {
       sendJson(response, 404, { error: 'not_found', path: pathname });
@@ -1947,6 +2593,10 @@ const handlePublicOrders = async (
       orderId: order.id,
       raffleId: order.raffleId,
     });
+    broadcastToSeller(order.sellerId, {
+      type: 'order_proof',
+      data: { orderId: order.id },
+    });
     return true;
   } catch (error: unknown) {
     sendJson(response, 400, {
@@ -2000,6 +2650,10 @@ export const createRifaApiServer = () =>
         return;
       }
 
+      if (await handleAdminWinners(request, response, pathname)) {
+        return;
+      }
+
       if (await handleAdminOrders(request, response, pathname)) {
         return;
       }
@@ -2013,6 +2667,10 @@ export const createRifaApiServer = () =>
       }
 
       if (await handleAdminNumbers(request, response, pathname)) {
+        return;
+      }
+
+      if (await handleAdminSse(request, response, pathname)) {
         return;
       }
 

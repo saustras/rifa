@@ -1,15 +1,12 @@
 import {
   ASSIGNMENT_MODES,
   DEFAULT_LANDING_CONFIG,
-  RAFFLE_NUMBER_STATUSES,
   RAFFLE_STATUSES,
   ROLES,
 } from '@rifa/shared';
 
 import { createLocalPgliteDatabase, ensureLocalSchema } from './client';
-import { raffleNumbers, rafflePrizes, raffles, sellers, users } from './schema';
-
-const displayNumber = (value: number, padding: number) => value.toString().padStart(padding, '0');
+import { rafflePrizes, raffles, sellers, users } from './schema';
 
 const seed = async () => {
   const { client, db } = createLocalPgliteDatabase();
@@ -110,18 +107,9 @@ const seed = async () => {
     })
     .onConflictDoNothing();
 
-  await db
-    .insert(raffleNumbers)
-    .values(
-      Array.from({ length: 100 }, (_, index) => ({
-        id: `raffle_demo_moto_number_${displayNumber(index, 2)}`,
-        raffleId: 'raffle_demo_moto',
-        number: index,
-        displayNumber: displayNumber(index, 2),
-        status: RAFFLE_NUMBER_STATUSES.available,
-      })),
-    )
-    .onConflictDoNothing();
+  // Lazy allocation: do NOT pre-create number rows. Numbers become rows only
+  // when they are reserved/assigned/blocked, so the demo raffle starts fully
+  // available without any raffle_numbers rows.
 
   await client.close();
 };

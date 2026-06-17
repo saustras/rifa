@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { blockNumberByValue, fetchRaffleNumbers, releaseNumber } from '../api';
-import type { AdminCredentials, AdminRaffle, AdminRaffleNumber } from '../types';
+import { blockNumberByValue, fetchRaffleNumbers, registerDrawResult, releaseNumber } from '../api';
+import { REQUEST_STATUS, type AdminCredentials, type AdminRaffle, type AdminRaffleNumber, type RequestStatus } from '../types';
 
 interface NumbersPageProps {
   readonly credentials: AdminCredentials;
@@ -56,6 +56,9 @@ export const NumbersPage = ({ credentials, raffles }: NumbersPageProps) => {
   const [modalNumber, setModalNumber] = useState<AdminRaffleNumber | null>(null);
   const [blockValue, setBlockValue] = useState('');
   const [message, setMessage] = useState('');
+  const [winnerSource, setWinnerSource] = useState('Resultado manual');
+  const [winnerNotes, setWinnerNotes] = useState('');
+  const [winnerRegisterStatus, setWinnerRegisterStatus] = useState<RequestStatus>(REQUEST_STATUS.idle);
 
   const selectedRaffle = raffles.find((raffle) => raffle.id === selectedRaffleId) ?? null;
 
@@ -88,6 +91,12 @@ export const NumbersPage = ({ credentials, raffles }: NumbersPageProps) => {
 
     void loadNumbers(selectedRaffleId);
   }, [credentials, selectedRaffleId]);
+
+  useEffect(() => {
+    setWinnerSource(selectedRaffle?.drawSourceName?.trim() || 'Resultado manual');
+    setWinnerNotes('');
+    setWinnerRegisterStatus(REQUEST_STATUS.idle);
+  }, [modalNumber?.id, selectedRaffle?.drawSourceName]);
 
   const summary = useMemo(() => {
     // With lazy allocation, only taken numbers exist as rows. The total comes
@@ -161,6 +170,41 @@ export const NumbersPage = ({ credentials, raffles }: NumbersPageProps) => {
     await loadNumbers(selectedRaffleId);
     setModalNumber(null);
     setError('');
+  };
+
+  const handleRegisterWinner = async () => {
+    if (!modalNumber || !selectedRaffle) {
+      return;
+    }
+
+    if (winnerSource.trim().length < 2) {
+      setError('Escribe la fuente del resultado antes de registrar el ganador.');
+      return;
+    }
+
+    setError('');
+    setMessage('');
+    setWinnerRegisterStatus(REQUEST_STATUS.loading);
+
+    try {
+      await registerDrawResult(credentials, selectedRaffle.id, {
+        winningNumber: modalNumber.number,
+        externalSource: winnerSource.trim(),
+        ...(winnerNotes.trim() ? { notes: winnerNotes.trim() } : {}),
+      });
+      setMessage(`Número ${modalNumber.displayNumber} registrado como ganador.`);
+      setWinnerNotes('');
+      setWinnerRegisterStatus(REQUEST_STATUS.success);
+      await loadNumbers(selectedRaffle.id);
+      setModalNumber(null);
+    } catch (registerError: unknown) {
+      setWinnerRegisterStatus(REQUEST_STATUS.error);
+      setError(
+        registerError instanceof Error
+          ? registerError.message
+          : 'No se pudo registrar el ganador. Revisa si esa campaña ya tiene resultado.',
+      );
+    }
   };
 
   const hasBuyerInfo = modalNumber && (
@@ -393,7 +437,49 @@ export const NumbersPage = ({ credentials, raffles }: NumbersPageProps) => {
               </>
             ) : null}
 
+            <section className="winner-modal-section" aria-labelledby="winner-modal-section-title">
+              <div>
+                <p className="modal-eyebrow">Resultado de sorteo</p>
+                <h3 id="winner-modal-section-title" className="modal-section-title">
+                  Registrar este número como ganador
+                </h3>
+                <p className="muted">
+                  Si la orden asociada está pagada, el sistema vincula automáticamente al comprador.
+                </p>
+              </div>
+              <div className="winner-modal-fields">
+                <label className="field">
+                  <span>Fuente del resultado</span>
+                  <input
+                    value={winnerSource}
+                    placeholder="Ej: Lotería, sorteo en vivo, acta"
+                    onChange={(event) => setWinnerSource(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>Notas opcionales</span>
+                  <textarea
+                    value={winnerNotes}
+                    placeholder="Detalle interno o evidencia del resultado."
+                    onChange={(event) => setWinnerNotes(event.target.value)}
+                  />
+                </label>
+              </div>
+            </section>
+
             <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={winnerRegisterStatus === REQUEST_STATUS.loading || modalNumber.status === 'winner'}
+                onClick={() => void handleRegisterWinner()}
+              >
+                {winnerRegisterStatus === REQUEST_STATUS.loading
+                  ? 'Registrando…'
+                  : modalNumber.status === 'winner'
+                    ? 'Ya es ganador'
+                    : 'Registrar ganador'}
+              </button>
               {modalNumber.status === 'blocked' || modalNumber.status === 'reserved' ? (
                 <button
                   type="button"

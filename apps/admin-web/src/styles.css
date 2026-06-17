@@ -60,13 +60,6 @@
   gap: 18px;
 }
 
-.winner-register-grid {
-  display: grid;
-  grid-template-columns: minmax(220px, 1.2fr) minmax(140px, 0.7fr) minmax(220px, 1fr) minmax(260px, 1.4fr) auto;
-  gap: 12px;
-  align-items: end;
-}
-
 .gallery-upload-layout {
   display: grid;
   grid-template-columns: minmax(180px, 240px) minmax(220px, 1fr) minmax(260px, 340px);
@@ -108,8 +101,7 @@
 
 .admin-gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 16px;
+  gap: 10px;
 }
 
 .admin-gallery-card,
@@ -121,14 +113,23 @@
   box-shadow: var(--shadow-sm, 0 4px 14px rgba(7, 23, 53, 0.06));
 }
 
+.admin-gallery-card {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: stretch;
+  padding: 10px;
+  overflow: visible;
+}
+
 .admin-gallery-image-button {
   width: 100%;
-  min-height: 190px;
+  min-height: 104px;
   display: grid;
   place-items: center;
   padding: 0;
-  border: 0;
-  border-bottom: 1px solid var(--border, #dbe3ef);
+  border: 1px solid var(--border, #dbe3ef);
+  border-radius: 14px;
   background:
     linear-gradient(45deg, rgba(219, 227, 239, 0.45) 25%, transparent 25%),
     linear-gradient(-45deg, rgba(219, 227, 239, 0.45) 25%, transparent 25%),
@@ -141,6 +142,7 @@
     0 10px,
     10px -10px,
     -10px 0;
+  overflow: hidden;
 }
 
 .admin-gallery-image-button:hover {
@@ -149,24 +151,26 @@
 
 .admin-gallery-image-button img {
   width: 100%;
-  height: 190px;
+  height: 104px;
   object-fit: contain;
   display: block;
 }
 
 .admin-gallery-editor {
-  padding: 12px;
+  padding: 0;
   display: grid;
-  grid-template-columns: 1fr minmax(76px, 96px);
-  gap: 10px;
+  grid-template-columns: minmax(180px, 0.85fr) minmax(220px, 1fr) minmax(78px, 92px);
+  gap: 8px;
+  align-items: end;
 }
 
 .admin-gallery-editor .field:nth-child(2) {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
 .admin-gallery-editor textarea {
-  min-height: 76px;
+  min-height: 44px;
+  max-height: 76px;
   resize: vertical;
 }
 
@@ -175,8 +179,16 @@
 }
 
 .compact-actions {
-  padding: 0 12px 12px;
-  flex-wrap: wrap;
+  align-self: end;
+  justify-content: flex-end;
+  padding: 0;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.compact-actions .btn-sm {
+  min-height: 34px;
+  padding-inline: 0.65rem;
 }
 
 .gallery-preview-modal {
@@ -235,10 +247,29 @@
 }
 
 @media (max-width: 860px) {
-  .winner-register-grid,
   .gallery-upload-layout,
   .winner-admin-card {
     grid-template-columns: 1fr;
+  }
+
+  .admin-gallery-card {
+    grid-template-columns: 96px minmax(0, 1fr);
+  }
+
+  .admin-gallery-image-button,
+  .admin-gallery-image-button img {
+    min-height: 88px;
+    height: 88px;
+  }
+
+  .admin-gallery-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .compact-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
 
@@ -2255,7 +2286,7 @@ button:disabled {
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 501;
-  width: min(480px, 94vw);
+  width: min(560px, 94vw);
   max-height: 88vh;
   overflow-y: auto;
   border: 1px solid var(--border);
@@ -2264,6 +2295,30 @@ button:disabled {
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18);
   padding: 1.5rem;
   margin: 0;
+}
+
+.winner-modal-section {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.winner-modal-section .modal-section-title {
+  margin: 0 0 0.35rem;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.winner-modal-fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+}
+
+.winner-modal-fields textarea {
+  min-height: 68px;
+  resize: vertical;
 }
 
 .modal-head {
@@ -2340,6 +2395,7 @@ button:disabled {
 
 .modal-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 1.5rem;
   padding-top: 1rem;

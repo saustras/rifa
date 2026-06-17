@@ -348,7 +348,7 @@ function App() {
       case 'participants':
         return <ParticipantsPage credentials={credentials} customers={customers} />;
       case 'winners':
-        return <WinnersPage credentials={credentials} raffles={raffles} />;
+        return <WinnersPage credentials={credentials} />;
       case 'numbers':
         return <NumbersPage credentials={credentials} raffles={raffles} />;
       case 'settings':

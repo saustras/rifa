@@ -6,6 +6,7 @@ import {
   deleteDeliveryGalleryImage,
   fetchDeliveryGallery,
   fetchWinners,
+  registerDrawResult,
   updateDeliveryGalleryImage,
   updateWinner,
   uploadWinnerPhoto,
@@ -13,6 +14,7 @@ import {
 import {
   REQUEST_STATUS,
   type AdminCredentials,
+  type AdminRaffle,
   type AdminWinner,
   type DeliveryGalleryImage,
   type RequestStatus,
@@ -20,6 +22,7 @@ import {
 
 interface WinnersPageProps {
   readonly credentials: AdminCredentials;
+  readonly raffles: readonly AdminRaffle[];
 }
 
 interface GalleryDraft {
@@ -45,7 +48,7 @@ const toGalleryDrafts = (
     ]),
   );
 
-export const WinnersPage = ({ credentials }: WinnersPageProps) => {
+export const WinnersPage = ({ credentials, raffles }: WinnersPageProps) => {
   const [winners, setWinners] = useState<readonly AdminWinner[]>([]);
   const [gallery, setGallery] = useState<readonly DeliveryGalleryImage[]>([]);
   const [status, setStatus] = useState<RequestStatus>(REQUEST_STATUS.loading);
@@ -56,6 +59,11 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
   const [galleryUploadStatus, setGalleryUploadStatus] = useState<RequestStatus>(REQUEST_STATUS.idle);
   const [uploadingWinnerId, setUploadingWinnerId] = useState<string>('');
   const [selectedGalleryImage, setSelectedGalleryImage] = useState<DeliveryGalleryImage | null>(null);
+  const [winnerRaffleId, setWinnerRaffleId] = useState<string>(() => raffles[0]?.id ?? '');
+  const [winnerNumber, setWinnerNumber] = useState<string>('');
+  const [winnerSource, setWinnerSource] = useState<string>('Resultado manual');
+  const [winnerNotes, setWinnerNotes] = useState<string>('');
+  const [winnerRegisterStatus, setWinnerRegisterStatus] = useState<RequestStatus>(REQUEST_STATUS.idle);
 
   const loadContent = async () => {
     setStatus(REQUEST_STATUS.loading);
@@ -79,6 +87,12 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
   useEffect(() => {
     void loadContent();
   }, [credentials]);
+
+  useEffect(() => {
+    if (!winnerRaffleId && raffles[0]) {
+      setWinnerRaffleId(raffles[0].id);
+    }
+  }, [raffles, winnerRaffleId]);
 
   const patchWinner = async (
     winner: AdminWinner,
@@ -141,6 +155,48 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
     } catch (error: unknown) {
       setGalleryUploadStatus(REQUEST_STATUS.error);
       setMessage(error instanceof Error ? error.message : 'No se pudo agregar la foto.');
+    }
+  };
+
+  const handleRegisterWinner = async () => {
+    const parsedWinnerNumber = Number(winnerNumber);
+
+    if (!winnerRaffleId) {
+      setMessage('Selecciona una campaña para registrar el ganador.');
+      return;
+    }
+
+    if (!Number.isInteger(parsedWinnerNumber) || parsedWinnerNumber < 0) {
+      setMessage('Escribe un número ganador válido.');
+      return;
+    }
+
+    if (winnerSource.trim().length < 2) {
+      setMessage('Escribe la fuente del resultado, por ejemplo “Lotería de Medellín”.');
+      return;
+    }
+
+    setWinnerRegisterStatus(REQUEST_STATUS.loading);
+    setMessage('Registrando ganador…');
+
+    try {
+      await registerDrawResult(credentials, winnerRaffleId, {
+        winningNumber: parsedWinnerNumber,
+        externalSource: winnerSource.trim(),
+        ...(winnerNotes.trim() ? { notes: winnerNotes.trim() } : {}),
+      });
+      setWinnerNumber('');
+      setWinnerNotes('');
+      setWinnerRegisterStatus(REQUEST_STATUS.success);
+      setMessage('Ganador registrado. Ahora puedes marcarlo para mostrarlo en la landing.');
+      await loadContent();
+    } catch (error: unknown) {
+      setWinnerRegisterStatus(REQUEST_STATUS.error);
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo registrar el ganador. Revisa si esa campaña ya tiene resultado.',
+      );
     }
   };
 
@@ -223,6 +279,66 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
   return (
     <div className="winners-page">
       {message ? <p className="alert" role="status">{message}</p> : null}
+
+      <section className="panel winner-register-panel">
+        <header className="panel-head panel-head-row">
+          <div>
+            <h2>Elegir ganador</h2>
+            <p className="muted">
+              Registra el número ganador de una campaña. Si el número pertenece a una compra pagada,
+              el sistema identifica al ganador automáticamente.
+            </p>
+          </div>
+        </header>
+
+        <div className="winner-register-grid">
+          <label className="field">
+            <span>Campaña</span>
+            <select value={winnerRaffleId} onChange={(event) => setWinnerRaffleId(event.target.value)}>
+              {raffles.length === 0 ? <option value="">Sin campañas</option> : null}
+              {raffles.map((raffle) => (
+                <option key={raffle.id} value={raffle.id}>
+                  {raffle.title} ({raffle.status})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Número ganador</span>
+            <input
+              type="number"
+              min={0}
+              placeholder="Ej: 12345"
+              value={winnerNumber}
+              onChange={(event) => setWinnerNumber(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Fuente del resultado</span>
+            <input
+              placeholder="Ej: Lotería, sorteo en vivo, acta"
+              value={winnerSource}
+              onChange={(event) => setWinnerSource(event.target.value)}
+            />
+          </label>
+          <label className="field field-grow">
+            <span>Notas opcionales</span>
+            <input
+              placeholder="Detalle interno o evidencia del resultado"
+              value={winnerNotes}
+              onChange={(event) => setWinnerNotes(event.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={winnerRegisterStatus === REQUEST_STATUS.loading || raffles.length === 0}
+            onClick={() => void handleRegisterWinner()}
+          >
+            {winnerRegisterStatus === REQUEST_STATUS.loading ? 'Registrando…' : 'Registrar ganador'}
+          </button>
+        </div>
+      </section>
 
       <section className="panel winners-gallery-panel">
         <header className="panel-head panel-head-row">

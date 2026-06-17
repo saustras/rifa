@@ -62,31 +62,73 @@
 
 .gallery-upload-layout {
   display: grid;
-  grid-template-columns: minmax(180px, 240px) minmax(220px, 1fr) minmax(260px, 340px);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 16px;
+  align-items: stretch;
+  margin: 10px 0 18px;
+  padding: 14px;
+  border: 1px solid var(--border, #dbe3ef);
+  border-radius: 18px;
+  background: linear-gradient(135deg, #f8fafc, #eef4fb);
+}
+
+.gallery-upload-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
   gap: 12px;
-  align-items: start;
-  margin-bottom: 18px;
+  align-content: start;
+  min-width: 0;
+}
+
+.gallery-upload-intro {
+  grid-column: 1 / -1;
+}
+
+.gallery-upload-intro h3,
+.gallery-upload-intro p {
+  margin: 0;
+}
+
+.gallery-upload-intro h3 {
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+}
+
+.gallery-upload-intro .muted {
+  margin-top: 0.2rem;
+  max-width: 58rem;
+}
+
+.gallery-upload-form textarea {
+  min-height: 74px;
+  resize: vertical;
 }
 
 .gallery-upload-layout .asset-upload-card {
   grid-column: auto;
-  padding: 0.7rem;
+  display: grid;
+  align-content: start;
+  height: 100%;
+  padding: 0.8rem;
+  border-color: var(--border-strong, #c8d4e6);
+  background: #fff;
 }
 
 .gallery-upload-layout .asset-upload-body {
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 0.7rem;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: stretch;
 }
 
 .gallery-upload-layout .asset-upload-preview .cover-preview,
 .gallery-upload-layout .cover-preview {
-  width: 72px;
-  height: 72px;
+  width: 88px;
+  height: 88px;
 }
 
 .gallery-upload-layout .cover-dropzone-action {
-  min-height: 72px;
-  padding: 0.65rem;
+  min-height: 88px;
+  padding: 0.7rem;
 }
 
 .gallery-upload-layout .cover-dropzone-icon {
@@ -97,6 +139,14 @@
 .gallery-upload-layout .asset-upload-head p,
 .gallery-upload-layout .cover-dropzone small {
   font-size: 0.72rem;
+}
+
+.gallery-upload-layout .asset-upload-head h3 {
+  font-size: 0.92rem;
+}
+
+.gallery-upload-layout .cover-dropzone-title {
+  font-size: 0.88rem;
 }
 
 .admin-gallery-grid {
@@ -249,6 +299,10 @@
 @media (max-width: 860px) {
   .gallery-upload-layout,
   .winner-admin-card {
+    grid-template-columns: 1fr;
+  }
+
+  .gallery-upload-form {
     grid-template-columns: 1fr;
   }
 

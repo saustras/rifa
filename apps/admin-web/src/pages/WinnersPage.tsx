@@ -233,19 +233,36 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
         </header>
 
         <div className="gallery-upload-layout">
-          <label className="field">
-            <span>Título</span>
-            <input value={galleryTitle} onChange={(event) => setGalleryTitle(event.target.value)} />
-          </label>
-          <label className="field field-grow">
-            <span>Comentario</span>
-            <input value={galleryCaption} onChange={(event) => setGalleryCaption(event.target.value)} />
-          </label>
+          <div className="gallery-upload-form">
+            <div className="gallery-upload-intro">
+              <p className="modal-eyebrow">Nueva imagen</p>
+              <h3>Agregar foto al carrusel</h3>
+              <p className="muted">
+                Completa el texto que aparecerá en la landing y luego selecciona la imagen.
+              </p>
+            </div>
+            <label className="field">
+              <span>Título</span>
+              <input
+                placeholder="Ej: Entrega del premio"
+                value={galleryTitle}
+                onChange={(event) => setGalleryTitle(event.target.value)}
+              />
+            </label>
+            <label className="field field-grow">
+              <span>Comentario</span>
+              <textarea
+                placeholder="Ej: Cliente feliz recibiendo su premio."
+                value={galleryCaption}
+                onChange={(event) => setGalleryCaption(event.target.value)}
+              />
+            </label>
+          </div>
           <ImageUploadField
-            label="Foto para el carrusel"
-            hint="Primero escribe título/comentario si quieres, luego sube la imagen."
+            label="Imagen"
+            hint="JPG, PNG, WebP o HEIC. Se optimiza automáticamente al subir."
             previewSrc={null}
-            emptyLabel="Sin foto seleccionada"
+            emptyLabel="Sin imagen"
             previewAlt="Vista previa de foto para carrusel"
             isUploading={galleryUploadStatus === REQUEST_STATUS.loading}
             statusNote={

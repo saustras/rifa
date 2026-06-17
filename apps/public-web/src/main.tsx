@@ -123,9 +123,10 @@ const normalizePaymentMethods = (
       // reuse ids, but two methods with the same id and different account/QR
       // data are still distinct payment options for the buyer.
       const key = [
-        method.id,
         method.label.toLowerCase(),
+        method.accountHolder ?? '',
         method.accountNumber ?? '',
+        method.documentNumber ?? '',
         method.qrImageUrl ?? '',
       ].join('|');
 
@@ -136,6 +137,36 @@ const normalizePaymentMethods = (
       seen.add(key);
       return true;
     });
+};
+
+const sellerSettingsToPaymentMethods = (
+  settings: SellerSettings | null,
+): readonly PaymentMethod[] => {
+  if (!settings) {
+    return [];
+  }
+
+  const defaultMethodDetails = {
+    accountHolder: settings.defaultPaymentAccountHolder?.trim() || undefined,
+    accountType: settings.defaultPaymentAccountType?.trim() || undefined,
+    accountNumber: settings.defaultPaymentAccountNumber?.trim() || undefined,
+    documentNumber: settings.defaultPaymentDocumentNumber?.trim() || undefined,
+    instructions: settings.defaultPaymentInstructions?.trim() || undefined,
+    qrImageUrl: settings.defaultPaymentQrImageUrl?.trim() || undefined,
+  };
+  const hasDefaultMethod = Object.values(defaultMethodDetails).some(Boolean);
+  const defaultMethod: PaymentMethod | null = hasDefaultMethod
+    ? {
+        id: 'seller-default-payment-method',
+        label: settings.defaultPaymentMethodLabel?.trim() || 'Medio de pago principal',
+        ...defaultMethodDetails,
+      }
+    : null;
+
+  return normalizePaymentMethods([
+    ...(defaultMethod ? [defaultMethod] : []),
+    ...(settings.paymentMethods ?? []),
+  ]);
 };
 
 // Extracts a WhatsApp-ready phone number (digits only, international format)
@@ -486,7 +517,7 @@ function App() {
       answer: textOrEmpty(landing.faqThreeAnswer),
     },
   ].filter((item) => item.question.trim().length > 0 && item.answer.trim().length > 0);
-  const configuredPaymentMethods = normalizePaymentMethods(sellerSettings?.paymentMethods);
+  const configuredPaymentMethods = sellerSettingsToPaymentMethods(sellerSettings);
   const fallbackPaymentMethodLabels = [
     landing.paymentMethodOne,
     landing.paymentMethodTwo,
@@ -601,7 +632,7 @@ function App() {
         }
       }
 
-      const currentPaymentMethods = normalizePaymentMethods(currentSellerSettings?.paymentMethods);
+      const currentPaymentMethods = sellerSettingsToPaymentMethods(currentSellerSettings);
       const result = await createPublicOrder({
         slug: activeRaffle.slug,
         raffle: activeRaffle,

@@ -214,8 +214,8 @@
 
 .pay-grid {
   display: grid;
-  grid-template-columns: minmax(360px, 460px) 1fr;
-  gap: 28px;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 20px;
   align-items: start;
   margin-bottom: 20px;
 }
@@ -224,23 +224,31 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  padding: 18px;
+  width: min(280px, 100%);
+  aspect-ratio: 1 / 1;
+  padding: 12px;
   border-radius: var(--radius-card);
   background: var(--bg-soft);
   border: 1px solid var(--border);
+  overflow: hidden;
 }
 
 .qr-box img {
   display: block;
+  width: min(212px, 100%);
+  height: min(212px, 100%);
+  object-fit: contain;
   border-radius: 12px;
   background: #fff;
 }
 
 .qr-box img.qr-image-uploaded {
-  width: min(420px, 100%);
-  height: auto;
-  min-height: 380px;
+  width: 100%;
+  height: 100%;
+  max-width: 212px;
+  max-height: 212px;
   object-fit: contain;
 }
 
@@ -527,8 +535,8 @@
 }
 
 .payment-methods-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
   gap: 16px;
   margin-bottom: 20px;
 }
@@ -555,6 +563,10 @@
   margin-bottom: 0;
 }
 
+.pay-method-card:only-child {
+  max-width: 760px;
+}
+
 .pay-method-card .instruction-box {
   margin-top: 12px;
   margin-bottom: 0;
@@ -568,6 +580,10 @@
   .pay-grid {
     grid-template-columns: 1fr;
     justify-items: center;
+  }
+
+  .qr-box {
+    width: min(280px, 100%);
   }
 
   .pay-details {

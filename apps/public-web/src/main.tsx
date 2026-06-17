@@ -119,7 +119,15 @@ const normalizePaymentMethods = (
     })
     .filter((method) => method.label.length > 0)
     .filter((method) => {
-      const key = method.id || method.label.toLowerCase();
+      // Do not dedupe by id alone. Old/migrated settings can accidentally
+      // reuse ids, but two methods with the same id and different account/QR
+      // data are still distinct payment options for the buyer.
+      const key = [
+        method.id,
+        method.label.toLowerCase(),
+        method.accountNumber ?? '',
+        method.qrImageUrl ?? '',
+      ].join('|');
 
       if (seen.has(key)) {
         return false;

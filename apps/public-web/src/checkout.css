@@ -221,14 +221,11 @@
 }
 
 .qr-box {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
+  display: grid;
+  place-items: center;
   width: min(280px, 100%);
   aspect-ratio: 1 / 1;
-  padding: 12px;
+  padding: 0;
   border-radius: var(--radius-card);
   background: var(--bg-soft);
   border: 1px solid var(--border);
@@ -237,19 +234,17 @@
 
 .qr-box img {
   display: block;
-  width: min(212px, 100%);
-  height: min(212px, 100%);
+  width: 100%;
+  height: 100%;
   object-fit: contain;
-  border-radius: 12px;
+  border-radius: inherit;
   background: #fff;
 }
 
 .qr-box img.qr-image-uploaded {
   width: 100%;
   height: 100%;
-  max-width: 212px;
-  max-height: 212px;
-  object-fit: contain;
+  object-fit: cover;
 }
 
 .qr-box span {

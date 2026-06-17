@@ -337,11 +337,6 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
                                 height={200}
                                 {...(method.qrImageUrl ? { className: 'qr-image-uploaded' } : {})}
                               />
-                              <span>
-                                {method.qrImageUrl
-                                  ? 'Escanea el QR de este método'
-                                  : 'Escanea con tu app bancaria'}
-                              </span>
                             </div>
                           ) : null}
 

@@ -1,5 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 
+import { ImageUploadField } from '../components/ImageUploadField';
 import {
   createDeliveryGalleryImage,
   deleteDeliveryGalleryImage,
@@ -9,23 +10,52 @@ import {
   updateWinner,
   uploadWinnerPhoto,
 } from '../api';
-import { REQUEST_STATUS, type AdminCredentials, type AdminWinner, type DeliveryGalleryImage, type RequestStatus } from '../types';
+import {
+  REQUEST_STATUS,
+  type AdminCredentials,
+  type AdminWinner,
+  type DeliveryGalleryImage,
+  type RequestStatus,
+} from '../types';
 
 interface WinnersPageProps {
   readonly credentials: AdminCredentials;
 }
 
+interface GalleryDraft {
+  readonly title: string;
+  readonly caption: string;
+  readonly displayOrder: string;
+}
+
 const formatDate = (value: string): string =>
   new Intl.DateTimeFormat('es-CO', { dateStyle: 'medium' }).format(new Date(value));
+
+const toGalleryDrafts = (
+  items: readonly DeliveryGalleryImage[],
+): Record<string, GalleryDraft> =>
+  Object.fromEntries(
+    items.map((item) => [
+      item.id,
+      {
+        title: item.title ?? '',
+        caption: item.caption ?? '',
+        displayOrder: String(item.displayOrder),
+      },
+    ]),
+  );
 
 export const WinnersPage = ({ credentials }: WinnersPageProps) => {
   const [winners, setWinners] = useState<readonly AdminWinner[]>([]);
   const [gallery, setGallery] = useState<readonly DeliveryGalleryImage[]>([]);
   const [status, setStatus] = useState<RequestStatus>(REQUEST_STATUS.loading);
   const [message, setMessage] = useState('');
-  const [galleryFile, setGalleryFile] = useState<File | null>(null);
   const [galleryTitle, setGalleryTitle] = useState('');
   const [galleryCaption, setGalleryCaption] = useState('');
+  const [galleryDrafts, setGalleryDrafts] = useState<Record<string, GalleryDraft>>({});
+  const [galleryUploadStatus, setGalleryUploadStatus] = useState<RequestStatus>(REQUEST_STATUS.idle);
+  const [uploadingWinnerId, setUploadingWinnerId] = useState<string>('');
+  const [selectedGalleryImage, setSelectedGalleryImage] = useState<DeliveryGalleryImage | null>(null);
 
   const loadContent = async () => {
     setStatus(REQUEST_STATUS.loading);
@@ -38,6 +68,7 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
       ]);
       setWinners(nextWinners);
       setGallery(nextGallery);
+      setGalleryDrafts(toGalleryDrafts(nextGallery));
       setStatus(REQUEST_STATUS.success);
     } catch (error: unknown) {
       setStatus(REQUEST_STATUS.error);
@@ -68,6 +99,7 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
       return;
     }
 
+    setUploadingWinnerId(winner.id);
     setMessage('Subiendo foto del ganador…');
 
     try {
@@ -76,33 +108,38 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
       setMessage('Foto del ganador actualizada.');
     } catch (error: unknown) {
       setMessage(error instanceof Error ? error.message : 'No se pudo subir la foto.');
+    } finally {
+      setUploadingWinnerId('');
     }
   };
 
-  const handleGallerySubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!galleryFile) {
-      setMessage('Selecciona una foto para agregar al carrusel.');
-      return;
-    }
-
+  const handleGalleryPhoto = async (file: File) => {
+    setGalleryUploadStatus(REQUEST_STATUS.loading);
     setMessage('Subiendo foto al carrusel…');
 
     try {
       const created = await createDeliveryGalleryImage(credentials, {
-        file: galleryFile,
+        file,
         ...(galleryTitle.trim() ? { title: galleryTitle.trim() } : {}),
         ...(galleryCaption.trim() ? { caption: galleryCaption.trim() } : {}),
         isPublic: true,
         displayOrder: gallery.length,
       });
       setGallery((current) => [...current, created]);
-      setGalleryFile(null);
+      setGalleryDrafts((current) => ({
+        ...current,
+        [created.id]: {
+          title: created.title ?? '',
+          caption: created.caption ?? '',
+          displayOrder: String(created.displayOrder),
+        },
+      }));
       setGalleryTitle('');
       setGalleryCaption('');
+      setGalleryUploadStatus(REQUEST_STATUS.success);
       setMessage('Foto agregada al carrusel.');
     } catch (error: unknown) {
+      setGalleryUploadStatus(REQUEST_STATUS.error);
       setMessage(error instanceof Error ? error.message : 'No se pudo agregar la foto.');
     }
   };
@@ -118,10 +155,65 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
     }
   };
 
+  const updateGalleryDraft = (
+    imageId: string,
+    field: keyof GalleryDraft,
+    value: string,
+  ) => {
+    setGalleryDrafts((current) => ({
+      ...current,
+      [imageId]: {
+        ...(current[imageId] ?? { title: '', caption: '', displayOrder: '0' }),
+        [field]: value,
+      },
+    }));
+  };
+
+  const saveGalleryImage = async (image: DeliveryGalleryImage) => {
+    const draft = galleryDrafts[image.id] ?? {
+      title: image.title ?? '',
+      caption: image.caption ?? '',
+      displayOrder: String(image.displayOrder),
+    };
+    const displayOrder = Number(draft.displayOrder);
+
+    if (!Number.isInteger(displayOrder) || displayOrder < 0) {
+      setMessage('El orden debe ser un número entero positivo.');
+      return;
+    }
+
+    try {
+      const updated = await updateDeliveryGalleryImage(credentials, image.id, {
+        title: draft.title.trim() || null,
+        caption: draft.caption.trim() || null,
+        displayOrder,
+      });
+      setGallery((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      setGalleryDrafts((current) => ({
+        ...current,
+        [updated.id]: {
+          title: updated.title ?? '',
+          caption: updated.caption ?? '',
+          displayOrder: String(updated.displayOrder),
+        },
+      }));
+      setMessage('Foto del carrusel actualizada.');
+    } catch (error: unknown) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo guardar la foto.');
+    }
+  };
+
   const removeGalleryImage = async (image: DeliveryGalleryImage) => {
     try {
       await deleteDeliveryGalleryImage(credentials, image.id);
       setGallery((current) => current.filter((item) => item.id !== image.id));
+      setGalleryDrafts((current) => {
+        const next = { ...current };
+        delete next[image.id];
+        return next;
+      });
       setMessage('Foto eliminada del carrusel.');
     } catch (error: unknown) {
       setMessage(error instanceof Error ? error.message : 'No se pudo eliminar la foto.');
@@ -140,15 +232,7 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
           </div>
         </header>
 
-        <form className="gallery-upload-form" onSubmit={(event) => void handleGallerySubmit(event)}>
-          <label className="field">
-            <span>Foto</span>
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-              onChange={(event) => setGalleryFile(event.target.files?.[0] ?? null)}
-            />
-          </label>
+        <div className="gallery-upload-layout">
           <label className="field">
             <span>Título</span>
             <input value={galleryTitle} onChange={(event) => setGalleryTitle(event.target.value)} />
@@ -157,19 +241,73 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
             <span>Comentario</span>
             <input value={galleryCaption} onChange={(event) => setGalleryCaption(event.target.value)} />
           </label>
-          <button type="submit" className="btn btn-primary">Agregar foto</button>
-        </form>
+          <ImageUploadField
+            label="Foto para el carrusel"
+            hint="Primero escribe título/comentario si quieres, luego sube la imagen."
+            previewSrc={null}
+            emptyLabel="Sin foto seleccionada"
+            previewAlt="Vista previa de foto para carrusel"
+            isUploading={galleryUploadStatus === REQUEST_STATUS.loading}
+            statusNote={
+              galleryUploadStatus === REQUEST_STATUS.loading
+                ? 'Subiendo foto al carrusel…'
+                : galleryUploadStatus === REQUEST_STATUS.success
+                  ? 'Última foto agregada correctamente.'
+                  : undefined
+            }
+            onFileSelect={(file) => void handleGalleryPhoto(file)}
+            onInvalidFile={setMessage}
+          />
+        </div>
 
         {gallery.length > 0 ? (
           <div className="admin-gallery-grid">
             {gallery.map((image) => (
               <article className="admin-gallery-card" key={image.id}>
-                <img src={image.imageUrl} alt={image.title ?? 'Foto de entrega'} />
-                <div>
-                  <strong>{image.title || 'Foto de entrega'}</strong>
-                  {image.caption ? <p className="muted">{image.caption}</p> : null}
+                <button
+                  type="button"
+                  className="admin-gallery-image-button"
+                  onClick={() => setSelectedGalleryImage(image)}
+                  aria-label={`Ver foto ${image.title ?? 'de entrega'} en grande`}
+                >
+                  <img src={image.imageUrl} alt={image.title ?? 'Foto de entrega'} />
+                </button>
+                <div className="admin-gallery-editor">
+                  <label className="field">
+                    <span>Título</span>
+                    <input
+                      value={galleryDrafts[image.id]?.title ?? ''}
+                      placeholder="Ej: Entrega del premio"
+                      onChange={(event) => updateGalleryDraft(image.id, 'title', event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Comentario</span>
+                    <textarea
+                      value={galleryDrafts[image.id]?.caption ?? ''}
+                      placeholder="Describe esta entrega o momento."
+                      onChange={(event) => updateGalleryDraft(image.id, 'caption', event.target.value)}
+                    />
+                  </label>
+                  <label className="field gallery-order-field">
+                    <span>Orden</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={galleryDrafts[image.id]?.displayOrder ?? '0'}
+                      onChange={(event) =>
+                        updateGalleryDraft(image.id, 'displayOrder', event.target.value)
+                      }
+                    />
+                  </label>
                 </div>
                 <div className="panel-actions compact-actions">
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => void saveGalleryImage(image)}>
+                    Guardar
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelectedGalleryImage(image)}>
+                    Ver grande
+                  </button>
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => void toggleGalleryImage(image)}>
                     {image.isPublic ? 'Ocultar' : 'Mostrar'}
                   </button>
@@ -184,6 +322,32 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
           <p className="muted">Aún no hay fotos para el carrusel.</p>
         )}
       </section>
+
+      {selectedGalleryImage ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Vista grande de foto">
+          <div className="modal-card panel gallery-preview-modal">
+            <header className="panel-head panel-head-row">
+              <div>
+                <h2>{selectedGalleryImage.title || 'Foto de entrega'}</h2>
+                {selectedGalleryImage.caption ? (
+                  <p className="muted">{selectedGalleryImage.caption}</p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setSelectedGalleryImage(null)}
+              >
+                Cerrar
+              </button>
+            </header>
+            <img
+              src={selectedGalleryImage.imageUrl}
+              alt={selectedGalleryImage.title ?? 'Foto de entrega'}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <section className="panel">
         <header className="panel-head panel-head-row">
@@ -205,13 +369,6 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
           <div className="winners-admin-list">
             {winners.map((winner) => (
               <article className={`winner-admin-card${winner.isPublicWinner ? ' is-public' : ''}`} key={winner.id}>
-                <div className="winner-admin-photo">
-                  {winner.winnerPhotoUrl ? (
-                    <img src={winner.winnerPhotoUrl} alt={`Foto de ${winner.winnerDisplayName ?? 'ganador'}`} />
-                  ) : (
-                    <span>Sin foto</span>
-                  )}
-                </div>
                 <div className="winner-admin-body">
                   <div className="winner-admin-head">
                     <div>
@@ -227,14 +384,19 @@ export const WinnersPage = ({ credentials }: WinnersPageProps) => {
                       Mostrar
                     </label>
                   </div>
-                  <label className="field">
-                    <span>Foto del ganador</span>
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                      onChange={(event) => void handleWinnerPhoto(winner, event.target.files?.[0])}
-                    />
-                  </label>
+                  <ImageUploadField
+                    label="Foto del ganador"
+                    hint="Usa una foto clara de la persona, la entrega o el premio."
+                    previewSrc={winner.winnerPhotoUrl}
+                    emptyLabel="Sin foto del ganador"
+                    previewAlt={`Foto de ${winner.winnerDisplayName ?? 'ganador'}`}
+                    isUploading={uploadingWinnerId === winner.id}
+                    statusNote={
+                      uploadingWinnerId === winner.id ? 'Subiendo foto del ganador…' : undefined
+                    }
+                    onFileSelect={(file) => void handleWinnerPhoto(winner, file)}
+                    onInvalidFile={setMessage}
+                  />
                   <label className="field">
                     <span>Comentario / testimonio</span>
                     <textarea

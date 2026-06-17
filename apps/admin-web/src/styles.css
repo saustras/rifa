@@ -797,6 +797,7 @@ button:disabled {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 1rem;
+  align-items: center;
 }
 
 .panel-empty {
@@ -891,6 +892,53 @@ button:disabled {
 
 .campaign-card .muted {
   margin: 0 0 1rem;
+}
+
+.campaign-options-menu {
+  position: relative;
+}
+
+.campaign-options-menu summary {
+  list-style: none;
+}
+
+.campaign-options-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.campaign-options-menu[open] summary {
+  background: var(--bg-soft);
+}
+
+.campaign-options-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: grid;
+  min-width: 220px;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-md);
+}
+
+.campaign-options-popover button {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-strong);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+}
+
+.campaign-options-popover button:hover,
+.campaign-options-popover button:focus-visible {
+  background: var(--bg-soft);
 }
 
 .campaign-meta {

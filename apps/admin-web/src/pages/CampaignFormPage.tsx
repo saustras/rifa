@@ -20,6 +20,7 @@ import { PUBLIC_WEB_URL } from '../config';
 import type {
   AdminCredentials,
   AdminPrize,
+  AdminRaffle,
   CreateRaffleInput,
   DrawResult,
   ParticipationPackage,
@@ -54,6 +55,7 @@ interface SaveErrorFeedback {
 interface CampaignFormPageProps {
   readonly credentials: AdminCredentials;
   readonly raffleId: string | null;
+  readonly cloneFromRaffleId: string | null;
   readonly activeCampaignId: string | null;
   readonly onDone: () => void;
   readonly onCancel: () => void;
@@ -318,9 +320,38 @@ const getSaveErrorFeedback = (saveError: unknown): SaveErrorFeedback => {
   };
 };
 
+const raffleToForm = (raffle: AdminRaffle, mode: 'edit' | 'clone'): CreateRaffleInput => {
+  const cloneSuffix = Date.now().toString(36).slice(-4).toUpperCase();
+  const title = mode === 'clone' ? `Copia de ${raffle.title} ${cloneSuffix}` : raffle.title;
+
+  return {
+    title,
+    slug: slugify(title),
+    description: raffle.description ?? '',
+    status: mode === 'clone' ? 'draft' : raffle.status,
+    pricePerNumber: Number(raffle.pricePerNumber),
+    currency: raffle.currency,
+    numberMin: raffle.numberMin,
+    numberMax: raffle.numberMax,
+    numberPadding: raffle.numberPadding ?? 2,
+    assignmentMode: raffle.assignmentMode ?? 'customer_choice',
+    paymentMethodLabel: raffle.paymentMethodLabel ?? '',
+    paymentAccountHolder: raffle.paymentAccountHolder ?? '',
+    paymentAccountType: raffle.paymentAccountType ?? '',
+    paymentAccountNumber: raffle.paymentAccountNumber ?? '',
+    paymentDocumentNumber: raffle.paymentDocumentNumber ?? '',
+    paymentInstructions: raffle.paymentInstructions ?? '',
+    drawSourceName: raffle.drawSourceName ?? '',
+    drawRule: raffle.drawRule ?? '',
+    drawDate: mode === 'clone' ? '' : isoToDateInput(raffle.drawDate),
+    landingConfig: readLanding(raffle.landingConfig),
+  };
+};
+
 export const CampaignFormPage = ({
   credentials,
   raffleId,
+  cloneFromRaffleId,
   activeCampaignId,
   onDone,
   onCancel,
@@ -333,7 +364,7 @@ export const CampaignFormPage = ({
   const [activeTab, setActiveTab] = useState<FormTab>('general');
   const [activeMarketingTab, setActiveMarketingTab] = useState<MarketingTab>('cover');
   const [sellerSettings, setSellerSettings] = useState<SellerSettings>(() => readSellerSettings());
-  const [isLoading, setIsLoading] = useState(Boolean(raffleId));
+  const [isLoading, setIsLoading] = useState(Boolean(raffleId || cloneFromRaffleId));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState<CampaignToast | null>(null);
@@ -344,6 +375,7 @@ export const CampaignFormPage = ({
   const [drawSource, setDrawSource] = useState('');
   const [drawNotes, setDrawNotes] = useState('');
 
+  const isCloningCampaign = Boolean(!raffleId && cloneFromRaffleId);
   const isLiveCampaign = Boolean(raffleId && activeCampaignId === raffleId);
   const campaignLanding = useMemo(() => readLanding(form.landingConfig), [form.landingConfig]);
   const landing = withSellerDefaults(campaignLanding, sellerSettings);
@@ -363,10 +395,19 @@ export const CampaignFormPage = ({
     return () => {
       active = false;
     };
-  }, [credentials, raffleId]);
+  }, [credentials, raffleId, cloneFromRaffleId]);
 
   useEffect(() => {
-    if (!raffleId) {
+    const sourceRaffleId = raffleId ?? cloneFromRaffleId;
+
+    if (!sourceRaffleId) {
+      setForm(defaultForm);
+      setCoverImageUrl(null);
+      setCoverPreview(null);
+      setPendingCoverFile(null);
+      setPrizes([]);
+      setDrawResult(null);
+      setIsLoading(false);
       return;
     }
 
@@ -377,38 +418,28 @@ export const CampaignFormPage = ({
       setError('');
 
       try {
-        const raffle = await fetchRaffleById(credentials, raffleId);
+        const raffle = await fetchRaffleById(credentials, sourceRaffleId);
 
         if (!active) {
           return;
         }
 
-        setForm({
-          title: raffle.title,
-          slug: raffle.slug,
-          description: raffle.description ?? '',
-          status: raffle.status,
-          pricePerNumber: Number(raffle.pricePerNumber),
-          currency: raffle.currency,
-          numberMin: raffle.numberMin,
-          numberMax: raffle.numberMax,
-          assignmentMode: raffle.assignmentMode ?? 'customer_choice',
-          paymentMethodLabel: raffle.paymentMethodLabel ?? '',
-          paymentAccountHolder: raffle.paymentAccountHolder ?? '',
-          paymentAccountType: raffle.paymentAccountType ?? '',
-          paymentAccountNumber: raffle.paymentAccountNumber ?? '',
-          paymentDocumentNumber: raffle.paymentDocumentNumber ?? '',
-          paymentInstructions: raffle.paymentInstructions ?? '',
-          drawSourceName: raffle.drawSourceName ?? '',
-          drawRule: raffle.drawRule ?? '',
-          drawDate: isoToDateInput(raffle.drawDate),
-          landingConfig: readLanding(raffle.landingConfig),
-        });
-        setCoverImageUrl(raffle.coverImageUrl ?? null);
+        setForm(raffleToForm(raffle, cloneFromRaffleId ? 'clone' : 'edit'));
+        setCoverImageUrl(cloneFromRaffleId ? null : (raffle.coverImageUrl ?? null));
+        setCoverPreview(null);
+        setPendingCoverFile(null);
+        if (cloneFromRaffleId) {
+          setPrizes([]);
+          setDrawResult(null);
+        }
       } catch (loadError: unknown) {
         if (active) {
           setError(
-            loadError instanceof Error ? loadError.message : 'No se pudo cargar la campaña.',
+            loadError instanceof Error
+              ? loadError.message
+              : cloneFromRaffleId
+                ? 'No se pudo cargar la campaña base.'
+                : 'No se pudo cargar la campaña.',
           );
         }
       } finally {
@@ -423,7 +454,7 @@ export const CampaignFormPage = ({
     return () => {
       active = false;
     };
-  }, [credentials, raffleId]);
+  }, [credentials, raffleId, cloneFromRaffleId]);
 
   useEffect(() => {
     if (!raffleId) {
@@ -782,12 +813,24 @@ export const CampaignFormPage = ({
             Poner en curso
           </button>
         </div>
+      ) : isCloningCampaign ? (
+        <div className="live-campaign-banner live-campaign-banner-muted" role="status">
+          <div>
+            <strong>Creando a partir de otra campaña</strong>
+            <p className="muted">
+              Copiamos textos, precios, planes, datos de pago y reglas. Las imágenes, ventas,
+              números y resultados no se copian.
+            </p>
+          </div>
+        </div>
       ) : null}
 
       <article className="panel campaign-editor">
         <header className="panel-head panel-head-row">
           <div>
-            <p className="panel-eyebrow">{raffleId ? 'Editar campaña' : 'Nueva campaña'}</p>
+            <p className="panel-eyebrow">
+              {raffleId ? 'Editar campaña' : isCloningCampaign ? 'Nueva campaña desde plantilla' : 'Nueva campaña'}
+            </p>
             <h2>{form.title.trim() || 'Sin título'}</h2>
             <p className="muted">Configura datos, publicidad de la landing e imagen del premio.</p>
           </div>

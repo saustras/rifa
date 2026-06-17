@@ -10,6 +10,7 @@ interface CampaignsPageProps {
   readonly activeCampaignId: string | null;
   readonly onCreate: () => void;
   readonly onEdit: (raffleId: string) => void;
+  readonly onClone: (raffleId: string) => void;
   readonly onRefresh: () => void;
 }
 
@@ -20,6 +21,7 @@ export const CampaignsPage = ({
   activeCampaignId,
   onCreate,
   onEdit,
+  onClone,
   onRefresh,
 }: CampaignsPageProps) => {
   if (raffles.length === 0) {
@@ -119,27 +121,35 @@ export const CampaignsPage = ({
                 >
                   Ver landing
                 </a>
-                <button type="button" className="btn btn-ghost" onClick={() => onEdit(raffle.id)}>
-                  Editar
-                </button>
-                {!isLive ? (
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() =>
-                      void activateRaffle(credentials, raffle.id).then(() => onRefresh())
-                    }
-                  >
-                    Poner en curso
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => void downloadRaffleExportCsv(credentials, raffle.id)}
-                >
-                  Exportar CSV
-                </button>
+                <details className="campaign-options-menu">
+                  <summary className="btn btn-ghost" aria-label={`Opciones de ${raffle.title}`}>
+                    Opciones
+                  </summary>
+                  <div className="campaign-options-popover">
+                    <button type="button" onClick={() => onEdit(raffle.id)}>
+                      Editar campaña
+                    </button>
+                    <button type="button" onClick={() => onClone(raffle.id)}>
+                      Crear a partir de campaña
+                    </button>
+                    {!isLive ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void activateRaffle(credentials, raffle.id).then(() => onRefresh())
+                        }
+                      >
+                        Poner en curso
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void downloadRaffleExportCsv(credentials, raffle.id)}
+                    >
+                      Exportar CSV
+                    </button>
+                  </div>
+                </details>
               </div>
             </article>
           );

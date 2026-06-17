@@ -71,6 +71,7 @@ function App() {
   const [currentView, setCurrentView] = useState<AdminView>(INITIAL_ADMIN_ROUTE.view);
   const [focusedOrderId, setFocusedOrderId] = useState<string>(INITIAL_ADMIN_ROUTE.orderId);
   const [editingRaffleId, setEditingRaffleId] = useState<string | null>(null);
+  const [cloneSourceRaffleId, setCloneSourceRaffleId] = useState<string | null>(null);
   const [orders, setOrders] = useState<readonly OrderListRow[]>([]);
   const [raffles, setRaffles] = useState<readonly AdminRaffle[]>([]);
   const [customers, setCustomers] = useState<readonly AdminCustomer[]>([]);
@@ -269,6 +270,7 @@ function App() {
 
   const handleCampaignFormDone = () => {
     setEditingRaffleId(null);
+    setCloneSourceRaffleId(null);
     setCurrentView('campaigns');
     void loadData();
   };
@@ -289,10 +291,12 @@ function App() {
         <CampaignFormPage
           credentials={credentials}
           raffleId={editingRaffleId}
+          cloneFromRaffleId={cloneSourceRaffleId}
           activeCampaignId={activeCampaign?.id ?? null}
           onDone={handleCampaignFormDone}
           onCancel={() => {
             setEditingRaffleId(null);
+            setCloneSourceRaffleId(null);
             setCurrentView('campaigns');
           }}
         />
@@ -323,10 +327,17 @@ function App() {
             onRefresh={() => void loadData()}
             onCreate={() => {
               setEditingRaffleId(null);
+              setCloneSourceRaffleId(null);
               setCurrentView('campaign-form');
             }}
             onEdit={(raffleId) => {
               setEditingRaffleId(raffleId);
+              setCloneSourceRaffleId(null);
+              setCurrentView('campaign-form');
+            }}
+            onClone={(raffleId) => {
+              setEditingRaffleId(null);
+              setCloneSourceRaffleId(raffleId);
               setCurrentView('campaign-form');
             }}
           />

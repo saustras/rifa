@@ -1,4 +1,10 @@
-import { DEFAULT_LANDING_CONFIG, type ParticipationPackage, type RaffleLandingConfig, type SellerSettings } from '@rifa/shared';
+import {
+  DEFAULT_LANDING_CONFIG,
+  type ParticipationPackage,
+  type PaymentMethod,
+  type RaffleLandingConfig,
+  type SellerSettings,
+} from '@rifa/shared';
 import { useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 
@@ -88,6 +94,40 @@ const getPackagePrice = (item: ParticipationPackage, fallbackPricePerTicket: num
   return Number.isFinite(configuredPrice) && configuredPrice > 0
     ? configuredPrice
     : fallbackPricePerTicket * item.quantity;
+};
+
+const normalizePaymentMethods = (
+  methods: readonly PaymentMethod[] | undefined,
+): readonly PaymentMethod[] => {
+  const seen = new Set<string>();
+
+  return (methods ?? [])
+    .map((method, index) => {
+      const id = method.id.trim() || `payment-method-${index + 1}`;
+      const label = method.label.trim();
+
+      return {
+        id,
+        label,
+        ...(method.accountHolder?.trim() ? { accountHolder: method.accountHolder.trim() } : {}),
+        ...(method.accountType?.trim() ? { accountType: method.accountType.trim() } : {}),
+        ...(method.accountNumber?.trim() ? { accountNumber: method.accountNumber.trim() } : {}),
+        ...(method.documentNumber?.trim() ? { documentNumber: method.documentNumber.trim() } : {}),
+        ...(method.instructions?.trim() ? { instructions: method.instructions.trim() } : {}),
+        ...(method.qrImageUrl?.trim() ? { qrImageUrl: method.qrImageUrl.trim() } : {}),
+      } satisfies PaymentMethod;
+    })
+    .filter((method) => method.label.length > 0)
+    .filter((method) => {
+      const key = method.id || method.label.toLowerCase();
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
 };
 
 // Extracts a WhatsApp-ready phone number (digits only, international format)
@@ -438,11 +478,16 @@ function App() {
       answer: textOrEmpty(landing.faqThreeAnswer),
     },
   ].filter((item) => item.question.trim().length > 0 && item.answer.trim().length > 0);
-  const paymentMethods = [
+  const configuredPaymentMethods = normalizePaymentMethods(sellerSettings?.paymentMethods);
+  const fallbackPaymentMethodLabels = [
     landing.paymentMethodOne,
     landing.paymentMethodTwo,
     landing.paymentMethodThree,
   ].filter((item): item is string => Boolean(item?.trim()));
+  const paymentMethodLabels =
+    configuredPaymentMethods.length > 0
+      ? configuredPaymentMethods.map((method) => method.label)
+      : fallbackPaymentMethodLabels;
   const socialLinks = [
     { label: 'Instagram', href: landing.instagramUrl, icon: 'instagram' },
     { label: 'Facebook', href: landing.facebookUrl, icon: 'facebook' },
@@ -538,6 +583,17 @@ function App() {
       }
 
       const activeRaffle = raffle;
+      let currentSellerSettings = sellerSettings;
+
+      if (!currentSellerSettings) {
+        currentSellerSettings = await fetchPublicSellerSettings().catch(() => null);
+
+        if (currentSellerSettings) {
+          setSellerSettings(currentSellerSettings);
+        }
+      }
+
+      const currentPaymentMethods = normalizePaymentMethods(currentSellerSettings?.paymentMethods);
       const result = await createPublicOrder({
         slug: activeRaffle.slug,
         raffle: activeRaffle,
@@ -551,10 +607,10 @@ function App() {
         reservedNumbers: result.reservedNumbers,
         buyer: buyerForm,
         quantity,
-        paymentMethods: sellerSettings?.paymentMethods ?? [],
+        paymentMethods: currentPaymentMethods,
         ownerWhatsappNumber: extractWhatsappNumber(
-          sellerSettings?.whatsappUrl,
-          sellerSettings?.supportPhone,
+          currentSellerSettings?.whatsappUrl,
+          currentSellerSettings?.supportPhone,
         ),
       });
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -873,11 +929,11 @@ function App() {
                       {isSubmitting ? 'Procesando…' : landing.submitButtonLabel}
                     </button>
 
-                    {paymentMethods.length > 0 ? (
+                    {paymentMethodLabels.length > 0 ? (
                       <div className="payment-methods">
                         <span>{landing.paymentMethodsLabel}</span>
                         <div className="method-pills">
-                          {paymentMethods.map((method) => (
+                          {paymentMethodLabels.map((method) => (
                             <span key={method} className="pill">
                               {method}
                             </span>

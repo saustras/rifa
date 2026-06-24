@@ -15,12 +15,22 @@ export const DashboardPage = ({
   onGoOrders,
   onGoCampaigns,
 }: DashboardPageProps) => {
-  const metrics = getMetrics(orders);
-  const activeRaffle = raffles.find((raffle) => raffle.status === 'active') ?? raffles[0];
+  const activeRaffle = raffles.find((raffle) => raffle.status === 'active') ?? null;
+  const campaignOrders = activeRaffle
+    ? orders.filter((order) => order.raffleId === activeRaffle.id)
+    : [];
+  const metrics = getMetrics(campaignOrders);
   const progress = activeRaffle
-    ? getRaffleProgress(orders, activeRaffle.id, activeRaffle.numberMax, activeRaffle.numberMin)
+    ? getRaffleProgress(
+        campaignOrders,
+        activeRaffle.id,
+        activeRaffle.numberMax,
+        activeRaffle.numberMin,
+      )
     : null;
-  const recentOrders = [...orders].slice(0, 5);
+  const recentOrders = [...campaignOrders]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 5);
 
   return (
     <>
@@ -52,7 +62,7 @@ export const DashboardPage = ({
           <div>
             <small>Participaciones vendidas</small>
             <strong>{metrics.participationsSold.toLocaleString('es-CO')}</strong>
-            <span className="kpi-trend">{metrics.total} órdenes totales</span>
+            <span className="kpi-trend">{metrics.total} órdenes en campaña</span>
           </div>
         </article>
         <article className="kpi-card">
@@ -130,7 +140,11 @@ export const DashboardPage = ({
           </header>
 
           {recentOrders.length === 0 ? (
-            <p className="muted">Aún no hay compras registradas.</p>
+            <p className="muted">
+              {activeRaffle
+                ? 'Aún no hay compras registradas en la campaña activa.'
+                : 'Activa una campaña para empezar a registrar compras.'}
+            </p>
           ) : (
             <div className="table-wrap">
               <table className="data-table">

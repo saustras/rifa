@@ -48,7 +48,7 @@ export const AdminShell = ({
   };
 
   const pageSubtitle: Record<Exclude<AdminView, 'campaign-form'>, string> = {
-    dashboard: 'Controla tus campañas, ventas y participantes en tiempo real.',
+    dashboard: 'Métricas y actividad de la campaña activa.',
     campaigns: 'Gestiona tus rifas activas y borradores.',
     orders: 'Revisa comprobantes, aprueba o rechaza compras.',
     participants: 'Clientes que compraron participaciones en tus campañas.',

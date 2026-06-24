@@ -1,9 +1,15 @@
 import { DEFAULT_LANDING_CONFIG, type PaymentMethod } from '@rifa/shared';
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 
-import { fetchPublicOrderStatus, uploadPaymentProof } from './api';
+import { fetchPublicOrderStatus, submitPublicOrderWithProof } from './api';
 import { Logo } from './components/Logo';
-import type { CheckoutSession, PaymentFlowStep } from './types';
+import type {
+  CheckoutSession,
+  CreatedOrder,
+  PaymentFlowStep,
+  PublicRaffle,
+  PublicRaffleNumber,
+} from './types';
 
 import './checkout.css';
 
@@ -17,14 +23,31 @@ const formatMoney = (value: string, currency: string): string =>
     maximumFractionDigits: 0,
   }).format(Number(value));
 
-const buildQrPayload = (session: CheckoutSession): string => {
-  const { raffle, order, buyer } = session;
+const computeCheckoutTotal = (raffle: PublicRaffle, quantity: number): number => {
+  const landing = { ...DEFAULT_LANDING_CONFIG, ...(raffle.landingConfig ?? {}) };
+  const packageMatch = (landing.participationPackages ?? []).find(
+    (item) => item.quantity === quantity,
+  );
+
+  if (packageMatch?.price !== undefined && Number(packageMatch.price) > 0) {
+    return Number(packageMatch.price);
+  }
+
+  return Number(raffle.pricePerNumber) * quantity;
+};
+
+const buildQrPayload = (
+  session: CheckoutSession,
+  totalAmount: number,
+  orderRef?: string,
+): string => {
+  const { raffle, buyer } = session;
   const landing = { ...DEFAULT_LANDING_CONFIG, ...(raffle.landingConfig ?? {}) };
   const brandLabel = [landing.brandName, landing.brandSubtitle].filter(Boolean).join(' ');
   const lines = [
     brandLabel || 'Campaña promocional',
-    `Orden: ${order.id.slice(0, 8).toUpperCase()}`,
-    `Monto: ${formatMoney(order.amount, order.currency)}`,
+    ...(orderRef ? [`Orden: ${orderRef}`] : []),
+    `Monto: ${formatMoney(String(totalAmount), raffle.currency)}`,
     `Referencia: ${buyer.documentNumber}`,
   ];
 
@@ -40,22 +63,26 @@ const buildQrPayload = (session: CheckoutSession): string => {
 };
 
 const FLOW_STEPS: ReadonlyArray<{ id: PaymentFlowStep; label: string }> = [
-  { id: 'pay', label: 'Realiza el pago' },
-  { id: 'proof', label: 'Sube comprobante' },
+  { id: 'pay', label: 'Pago y comprobante' },
   { id: 'done', label: 'Confirmación' },
 ];
 
-const buildWhatsappNotificationUrl = (session: CheckoutSession): string | null => {
+const buildWhatsappNotificationUrl = (input: {
+  readonly session: CheckoutSession;
+  readonly order: CreatedOrder;
+  readonly reservedNumbers: readonly PublicRaffleNumber[];
+}): string | null => {
+  const { session, order, reservedNumbers } = input;
   const number = (session.ownerWhatsappNumber ?? '').replace(/\D/g, '');
 
   if (number.length < 7) {
     return null;
   }
 
-  const orderRef = session.order.id.slice(0, 8).toUpperCase();
+  const orderRef = order.id.slice(0, 8).toUpperCase();
   const numbers =
-    session.reservedNumbers.length > 0
-      ? session.reservedNumbers.map((item) => item.displayNumber).join(', ')
+    reservedNumbers.length > 0
+      ? reservedNumbers.map((item) => item.displayNumber).join(', ')
       : null;
 
   const lines = [
@@ -64,7 +91,7 @@ const buildWhatsappNotificationUrl = (session: CheckoutSession): string | null =
     `Campaña: ${session.raffle.title}`,
     `Orden: #${orderRef}`,
     `Participaciones: ${session.quantity}`,
-    `Total: ${formatMoney(session.order.amount, session.order.currency)}`,
+    `Total: ${formatMoney(order.amount, order.currency)}`,
     '',
     'Mis datos:',
     `Nombre: ${session.buyer.fullName}`,
@@ -94,15 +121,30 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
 
 export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
   const [step, setStep] = useState<PaymentFlowStep>('pay');
+  const [selectedMethodId, setSelectedMethodId] = useState(
+    () => session.paymentMethods?.[0]?.id ?? 'default',
+  );
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [proofPreview, setProofPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string>('');
-  const [orderStatus, setOrderStatus] = useState(session.order.status);
+  const [createdOrder, setCreatedOrder] = useState<CreatedOrder | null>(session.order ?? null);
+  const [reservedNumbers, setReservedNumbers] = useState<readonly PublicRaffleNumber[]>(
+    session.reservedNumbers ?? [],
+  );
+  const [orderStatus, setOrderStatus] = useState(session.order?.status ?? 'pending_review');
   const [assignedNumbers, setAssignedNumbers] = useState<string>('');
 
+  const activeOrderId = createdOrder?.id ?? null;
+  const totalAmount = createdOrder
+    ? Number(createdOrder.amount)
+    : computeCheckoutTotal(session.raffle, session.quantity);
+  const orderRef = createdOrder
+    ? createdOrder.id.slice(0, 8).toUpperCase()
+    : session.buyer.documentNumber;
+
   useEffect(() => {
-    if (step !== 'done') {
+    if (step !== 'done' || !activeOrderId) {
       return;
     }
 
@@ -110,7 +152,7 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
 
     const pollStatus = async () => {
       try {
-        const status = await fetchPublicOrderStatus(session.order.id);
+        const status = await fetchPublicOrderStatus(activeOrderId);
 
         if (!active) {
           return;
@@ -133,10 +175,7 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
       active = false;
       window.clearInterval(interval);
     };
-  }, [step, session.order.id]);
-
-  const orderRef = session.order.id.slice(0, 8).toUpperCase();
-  const totalAmount = Number(session.order.amount);
+  }, [step, activeOrderId]);
 
   const handleProofSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -150,20 +189,32 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
     setError('');
 
     try {
-      await uploadPaymentProof(session.order.id, proofFile);
+      const result = await submitPublicOrderWithProof({
+        slug: session.raffle.slug,
+        buyer: session.buyer,
+        quantity: session.quantity,
+        proofFile,
+      });
+
+      setCreatedOrder(result.order);
+      setReservedNumbers(result.reservedNumbers);
+      setOrderStatus(result.order.status);
       setStep('done');
       window.scrollTo({ top: 0, behavior: 'smooth' });
 
-      // Additional heads-up channel: open WhatsApp to the raffle owner with the
-      // order details prefilled. (WhatsApp links can't auto-attach the image;
-      // the buyer can attach the screenshot manually if they wish.)
-      const whatsappUrl = buildWhatsappNotificationUrl(session);
+      const whatsappUrl = buildWhatsappNotificationUrl({
+        session,
+        order: result.order,
+        reservedNumbers: result.reservedNumbers,
+      });
       if (whatsappUrl) {
         window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
       }
     } catch (uploadError: unknown) {
       setError(
-        uploadError instanceof Error ? uploadError.message : 'No se pudo subir el comprobante.',
+        uploadError instanceof Error
+          ? uploadError.message
+          : 'No se pudo registrar tu compra con el comprobante.',
       );
     } finally {
       setIsUploading(false);
@@ -192,12 +243,11 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
   };
 
   const currentStepIndex = FLOW_STEPS.findIndex((item) => item.id === step);
-  const whatsappNotifyUrl = buildWhatsappNotificationUrl(session);
   const landing = { ...DEFAULT_LANDING_CONFIG, ...(session.raffle.landingConfig ?? {}) };
   const fallbackQrUrl = session.raffle.paymentQrImageUrl
     ? session.raffle.paymentQrImageUrl
     : `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(
-        buildQrPayload(session),
+        buildQrPayload(session, totalAmount, createdOrder ? orderRef : undefined),
       )}`;
 
   // Prefer the seller's configured payment methods; fall back to the single
@@ -219,6 +269,31 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
           },
         ];
   const isSingleLegacyMethod = configuredMethods.length === 0;
+
+  const selectedMethod =
+    paymentMethods.find((method) => method.id === selectedMethodId) ?? paymentMethods[0];
+
+  const getMethodQrSrc = (method: PaymentMethod): string | null => {
+    if (method.qrImageUrl) {
+      return method.qrImageUrl;
+    }
+
+    if (isSingleLegacyMethod) {
+      return fallbackQrUrl;
+    }
+
+    return null;
+  };
+
+  const selectedQrSrc = selectedMethod ? getMethodQrSrc(selectedMethod) : null;
+  const whatsappNotifyUrl =
+    createdOrder && step === 'done'
+      ? buildWhatsappNotificationUrl({
+          session,
+          order: createdOrder,
+          reservedNumbers,
+        })
+      : null;
 
   return (
     <div className="oryum-page checkout-page">
@@ -258,12 +333,13 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
         </ol>
 
         <div className="checkout-layout">
-          <aside className="checkout-summary-card">
+          <div className="checkout-sidebar">
+            <aside className="checkout-summary-card">
             <h2>Resumen de tu orden</h2>
             <dl className="summary-list">
               <div>
-                <dt>Referencia</dt>
-                <dd>#{orderRef}</dd>
+                <dt>{createdOrder ? 'Referencia' : 'Referencia de pago'}</dt>
+                <dd>{createdOrder ? `#${orderRef}` : orderRef}</dd>
               </div>
               <div>
                 <dt>Participaciones</dt>
@@ -272,7 +348,7 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
               <div>
                 <dt>Total a pagar</dt>
                 <dd className="summary-total">
-                  {formatPriceDisplay(totalAmount)} <span>{session.order.currency}</span>
+                  {formatPriceDisplay(totalAmount)} <span>{session.raffle.currency}</span>
                 </dd>
               </div>
               <div>
@@ -285,126 +361,107 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
               </div>
             </dl>
 
-            {session.reservedNumbers.length > 0 ? (
+            {reservedNumbers.length > 0 ? (
               <div className="reserved-numbers">
                 <strong>Tus números reservados</strong>
                 <div className="number-chips">
-                  {session.reservedNumbers.map((item) => (
+                  {reservedNumbers.map((item) => (
                     <span key={item.id}>{item.displayNumber}</span>
                   ))}
                 </div>
               </div>
             ) : (
-              <p className="summary-note">Tus números se asignarán cuando el pago sea aprobado.</p>
+              <p className="summary-note">
+                Tus números se asignarán al confirmar el pago con tu comprobante.
+              </p>
             )}
-          </aside>
+            </aside>
+
+            {step === 'pay' && paymentMethods.length > 0 ? (
+              <nav className="payment-method-selector" aria-label="Medios de pago">
+                <span className="payment-method-selector-label">Medio de pago</span>
+                {paymentMethods.map((method) => (
+                  <button
+                    key={method.id}
+                    type="button"
+                    className={`payment-method-btn${
+                      selectedMethod?.id === method.id ? ' is-active' : ''
+                    }`}
+                    aria-pressed={selectedMethod?.id === method.id}
+                    onClick={() => setSelectedMethodId(method.id)}
+                  >
+                    {method.label}
+                  </button>
+                ))}
+              </nav>
+            ) : null}
+          </div>
 
           <div className="checkout-panel">
             {step === 'pay' ? (
               <section className="checkout-card" aria-labelledby="pay-title">
                 <h2 id="pay-title">1. Realiza tu pago</h2>
-                <p className="checkout-lead">
-                  Escanea el código QR o transfiere el monto exacto. Usa la referencia de tu orden.
-                </p>
-
-                <div className="pay-amount pay-amount-block">
-                  <small>Monto exacto a transferir</small>
-                  <strong>{formatMoney(session.order.amount, session.order.currency)}</strong>
-                  <span className="pay-reference">
-                    Referencia: <strong>#{orderRef}</strong>
-                  </span>
-                </div>
-
-                <div className="payment-methods-grid">
-                  {paymentMethods.map((method) => {
-                    const qrSrc = method.qrImageUrl
-                      ? method.qrImageUrl
-                      : isSingleLegacyMethod
-                        ? fallbackQrUrl
-                        : null;
-
-                    return (
-                      <div className="pay-method-card" key={method.id}>
-                        <h3 className="pay-method-title">{method.label}</h3>
-
-                        <div className="pay-grid">
-                          {qrSrc ? (
-                            <div className="qr-box">
-                              <img
-                                src={qrSrc}
-                                alt={`Código QR para pagar con ${method.label}`}
-                                width={200}
-                                height={200}
-                                {...(method.qrImageUrl ? { className: 'qr-image-uploaded' } : {})}
-                              />
-                            </div>
-                          ) : null}
-
-                          <div className="pay-details">
-                            <ul className="pay-meta">
-                              {method.accountHolder ? (
-                                <li>
-                                  <span>Titular</span>
-                                  <strong>{method.accountHolder}</strong>
-                                </li>
-                              ) : null}
-                              {method.accountType ? (
-                                <li>
-                                  <span>Tipo de cuenta</span>
-                                  <strong>{method.accountType}</strong>
-                                </li>
-                              ) : null}
-                              {method.accountNumber ? (
-                                <li>
-                                  <span>Cuenta / Nequi</span>
-                                  <strong>{method.accountNumber}</strong>
-                                </li>
-                              ) : null}
-                              {method.documentNumber ? (
-                                <li>
-                                  <span>Documento / NIT</span>
-                                  <strong>{method.documentNumber}</strong>
-                                </li>
-                              ) : null}
-                            </ul>
-                          </div>
-                        </div>
-
-                        {method.instructions ? (
-                          <div className="instruction-box">
-                            <strong>Instrucciones</strong>
-                            <p>{method.instructions}</p>
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
 
                 <ol className="instruction-steps">
                   <li>Abre tu app bancaria o billetera digital.</li>
                   <li>Escanea el QR o copia los datos de pago.</li>
                   <li>Transfiere el monto exacto con la referencia indicada.</li>
-                  <li>Guarda el comprobante y continúa al siguiente paso.</li>
+                  <li>Sube el comprobante y confirma con el botón de abajo.</li>
                 </ol>
 
-                <button
-                  type="button"
-                  className="btn btn-primary btn-block"
-                  onClick={() => setStep('proof')}
-                >
-                  Ya realicé el pago →
-                </button>
-              </section>
-            ) : null}
+                {selectedMethod ? (
+                  <div className="pay-method-card">
+                    <div className="pay-grid">
+                      {selectedQrSrc ? (
+                        <div className="qr-box">
+                          <img
+                            src={selectedQrSrc}
+                            alt={`Código QR para pagar con ${selectedMethod.label}`}
+                            width={200}
+                            height={200}
+                            {...(selectedMethod.qrImageUrl ? { className: 'qr-image-uploaded' } : {})}
+                          />
+                        </div>
+                      ) : null}
 
-            {step === 'proof' ? (
-              <section className="checkout-card" aria-labelledby="proof-title">
-                <h2 id="proof-title">2. Sube tu comprobante</h2>
-                <p className="checkout-lead">
-                  Adjunta la captura o foto del pago. Verificaremos y te enviaremos un mensaje de
-                  confirmación.
-                </p>
+                      <div className="pay-details">
+                        <ul className="pay-meta">
+                          {selectedMethod.accountHolder ? (
+                            <li>
+                              <span>Titular</span>
+                              <strong>{selectedMethod.accountHolder}</strong>
+                            </li>
+                          ) : null}
+                          {selectedMethod.accountType ? (
+                            <li>
+                              <span>Tipo de cuenta</span>
+                              <strong>{selectedMethod.accountType}</strong>
+                            </li>
+                          ) : null}
+                          {selectedMethod.accountNumber ? (
+                            <li>
+                              <span>Cuenta / Nequi</span>
+                              <strong>{selectedMethod.accountNumber}</strong>
+                            </li>
+                          ) : null}
+                          {selectedMethod.documentNumber ? (
+                            <li>
+                              <span>Documento / NIT</span>
+                              <strong>{selectedMethod.documentNumber}</strong>
+                            </li>
+                          ) : null}
+                        </ul>
+                      </div>
+                    </div>
+
+                    {selectedMethod.instructions ? (
+                      <div className="instruction-box">
+                        <strong>Instrucciones</strong>
+                        <p>{selectedMethod.instructions}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <form className="proof-form" onSubmit={handleProofSubmit}>
                   <label className={`proof-upload${proofPreview ? ' has-preview' : ''}`}>
@@ -420,8 +477,6 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
                         src={proofPreview}
                         alt="Vista previa del comprobante"
                         onError={() => {
-                          // Some formats (e.g. HEIC on Android) can't be shown;
-                          // fall back to the filename + confirmation text.
                           setProofPreview((current) => {
                             if (current) {
                               URL.revokeObjectURL(current);
@@ -459,18 +514,13 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
                     </p>
                   ) : null}
 
-                  <div className="proof-actions">
-                    <button type="button" className="btn btn-ghost" onClick={() => setStep('pay')}>
-                      ← Volver
-                    </button>
-                    <button
-                      type="submit"
-                      className="btn btn-primary"
-                      disabled={isUploading || !proofFile}
-                    >
-                      {isUploading ? 'Subiendo…' : 'Enviar comprobante'}
-                    </button>
-                  </div>
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-block"
+                    disabled={isUploading || !proofFile}
+                  >
+                    {isUploading ? 'Enviando…' : 'Ya realicé el pago →'}
+                  </button>
                 </form>
               </section>
             ) : null}
@@ -489,7 +539,7 @@ export const PaymentFlowPage = ({ session, onBack }: PaymentFlowPageProps) => {
                     />
                   </svg>
                 </div>
-                <h2 id="done-title">3. Espera la confirmación</h2>
+                <h2 id="done-title">2. Espera la confirmación</h2>
                 <p className="checkout-lead">
                   Recibimos tu comprobante. Nuestro equipo lo revisará y te avisaremos en minutos.
                 </p>

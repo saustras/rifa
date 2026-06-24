@@ -242,6 +242,13 @@ export const createPublicOrderSchema = z
     isAdultConfirmed: z.literal(true),
     numbersRequested: z.coerce.number().int().min(1).max(100).optional(),
     selectedNumbers: z.array(z.coerce.number().int().min(0)).max(100).optional(),
+    proof: z
+      .object({
+        fileName: z.string().min(1).max(180),
+        mimeType: uploadImageMimeTypeSchema,
+        dataBase64: uploadImageDataSchema,
+      })
+      .optional(),
   })
   .superRefine((value, context) => {
     if (!value.numbersRequested && !value.selectedNumbers?.length) {

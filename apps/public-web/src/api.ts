@@ -66,6 +66,48 @@ export interface CreateOrderInput {
   readonly quantity: number;
 }
 
+export const submitPublicOrderWithProof = async ({
+  slug,
+  buyer,
+  quantity,
+  proofFile,
+}: {
+  readonly slug: string;
+  readonly buyer: BuyerFormState;
+  readonly quantity: number;
+  readonly proofFile: File;
+}): Promise<{
+  readonly order: CreatedOrder;
+  readonly reservedNumbers: readonly PublicRaffleNumber[];
+}> => {
+  const prepared = await prepareImageForUpload(proofFile);
+
+  const response = await requestJson<{
+    readonly data: {
+      readonly order: CreatedOrder;
+      readonly reservedNumbers: readonly PublicRaffleNumber[];
+    };
+  }>(`/api/public/raffles/${slug}/orders`, {
+    method: 'POST',
+    body: JSON.stringify({
+      fullName: buyer.fullName,
+      documentNumber: buyer.documentNumber,
+      email: buyer.email,
+      phone: buyer.phone,
+      acceptedTerms: true,
+      isAdultConfirmed: true,
+      numbersRequested: quantity,
+      proof: {
+        fileName: prepared.fileName,
+        mimeType: prepared.mimeType,
+        dataBase64: prepared.dataBase64,
+      },
+    }),
+  });
+
+  return response.data;
+};
+
 export const createPublicOrder = async ({
   slug,
   raffle,

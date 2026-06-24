@@ -9,18 +9,16 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import {
-  createPublicOrder,
   fetchCurrentPublicRaffle,
   fetchPublicDrawResult,
   fetchPublicRaffle,
-  fetchPublicRaffleNumbers,
   fetchPublicSellerSettings,
   fetchPublicWinnersContent,
 } from './api';
 import type { PublicDrawResult } from './api';
 import { Logo } from './components/Logo';
 import { PaymentFlowPage } from './PaymentFlowPage';
-import type { BuyerFormState, CampaignStats, CheckoutSession, PublicRaffle, PublicWinnersContent } from './types';
+import type { BuyerFormState, CheckoutSession, PublicRaffle, PublicWinnersContent } from './types';
 
 import './styles.css';
 
@@ -39,25 +37,6 @@ const initialBuyerForm: BuyerFormState = {
   documentNumber: '',
   email: '',
   phone: '',
-};
-
-const buildCampaignStats = (
-  raffle: PublicRaffle,
-  numbers: readonly { status: string }[],
-): CampaignStats => {
-  const totalTickets = raffle.numberMax - raffle.numberMin + 1;
-  const soldTickets = numbers.filter((item) => item.status === 'assigned').length;
-  const reservedTickets = numbers.filter((item) => item.status === 'reserved').length;
-  const occupiedTickets = soldTickets + reservedTickets;
-  const soldPercentage =
-    totalTickets > 0 ? Math.min(100, Math.round((occupiedTickets / totalTickets) * 100)) : 0;
-
-  return {
-    totalTickets,
-    soldTickets: occupiedTickets,
-    availableTickets: Math.max(0, totalTickets - occupiedTickets),
-    soldPercentage,
-  };
 };
 
 const normalizeParticipationPackages = (
@@ -425,12 +404,6 @@ function App() {
   const [buyerForm, setBuyerForm] = useState<BuyerFormState>(initialBuyerForm);
   const [checkoutSession, setCheckoutSession] = useState<CheckoutSession | null>(null);
   const [raffle, setRaffle] = useState<PublicRaffle | null>(null);
-  const [stats, setStats] = useState<CampaignStats>({
-    totalTickets: 100,
-    soldTickets: 0,
-    availableTickets: 100,
-    soldPercentage: 0,
-  });
   const [drawResult, setDrawResult] = useState<PublicDrawResult | null>(null);
   const [winnersContent, setWinnersContent] = useState<PublicWinnersContent>({
     winners: [],
@@ -545,9 +518,8 @@ function App() {
           ? await fetchPublicRaffle(DEFAULT_RAFFLE_SLUG)
           : await fetchCurrentPublicRaffle();
         const activeSlug = selectedRaffle.slug;
-        const [loadedRaffle, numbers, result, loadedWinnersContent] = await Promise.all([
+        const [loadedRaffle, result, loadedWinnersContent] = await Promise.all([
           Promise.resolve(selectedRaffle),
-          fetchPublicRaffleNumbers(activeSlug),
           fetchPublicDrawResult(activeSlug).catch(() => null),
           fetchPublicWinnersContent(activeSlug).catch(() => ({ winners: [], gallery: [] })),
         ]);
@@ -557,7 +529,6 @@ function App() {
         }
 
         setRaffle(loadedRaffle);
-        setStats(buildCampaignStats(loadedRaffle, numbers));
         setDrawResult(result);
         setWinnersContent(loadedWinnersContent);
         setLoadError('');
@@ -633,17 +604,9 @@ function App() {
       }
 
       const currentPaymentMethods = sellerSettingsToPaymentMethods(currentSellerSettings);
-      const result = await createPublicOrder({
-        slug: activeRaffle.slug,
-        raffle: activeRaffle,
-        buyer: buyerForm,
-        quantity,
-      });
 
       setCheckoutSession({
         raffle: activeRaffle,
-        order: result.order,
-        reservedNumbers: result.reservedNumbers,
         buyer: buyerForm,
         quantity,
         paymentMethods: currentPaymentMethods,
@@ -719,37 +682,59 @@ function App() {
           </div>
 
           <div className="container hero-stage">
-            <div className="hero-visual">
-              <div className="hero-curve hero-curve-1" />
-              <div className="hero-curve hero-curve-2" />
-              <img
-                className="hero-motorcycle"
-                src={heroImageSrc}
-                alt={heroImageAlt}
-                width={1024}
-                height={682}
-                loading="eager"
-                fetchPriority="high"
-              />
-              <div className="hero-visual-shadow" />
-            </div>
+            <div className="hero-promo">
+              <div className="hero-visual">
+                <div className="hero-curve hero-curve-1" />
+                <div className="hero-curve hero-curve-2" />
+                <img
+                  className="hero-motorcycle"
+                  src={heroImageSrc}
+                  alt={heroImageAlt}
+                  width={1024}
+                  height={682}
+                  loading="eager"
+                  fetchPriority="high"
+                />
+                <div className="hero-visual-shadow" />
+              </div>
 
-            <div className="hero-copy">
-              <span className="badge badge-gold">
-                <span className="badge-dot" /> {landing.heroBadge}
-              </span>
-              <h1 id="hero-title" className="hero-title">
-                {landing.heroTitle} <span className="accent">{landing.heroAccent}</span>
-              </h1>
-              <p className="hero-subtitle">{landing.heroSubtitle}</p>
+              <div className="hero-copy">
+                <div className="hero-copy-intro">
+                  <span className="badge badge-gold">
+                    <span className="badge-dot" /> {landing.heroBadge}
+                  </span>
+                  <h1 id="hero-title" className="hero-title">
+                    {landing.heroTitle} <span className="accent">{landing.heroAccent}</span>
+                  </h1>
+                  <p className="hero-subtitle">{landing.heroSubtitle}</p>
+                </div>
 
-              <div className="trust-grid">
-                {trustCards.map((card) => (
-                  <div key={card.title} className="trust-card">
-                    <span className="trust-icon">{card.icon}</span>
-                    <strong>{card.title}</strong>
+                {steps.length > 0 ? (
+                  <ol className="hero-highlights" aria-label="Pasos para participar">
+                    {steps.map((step, index) => (
+                      <li key={`${step.title}-${index}`} className="hero-highlight-item">
+                        <span className="hero-highlight-index" aria-hidden="true">
+                          {index + 1}
+                        </span>
+                        <div className="hero-highlight-body">
+                          <strong>{step.title}</strong>
+                          {step.description ? <p>{step.description}</p> : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+
+                {trustCards.length > 0 ? (
+                  <div className="trust-grid">
+                    {trustCards.map((card) => (
+                      <div key={card.title} className="trust-card">
+                        <span className="trust-icon">{card.icon}</span>
+                        <strong>{card.title}</strong>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                ) : null}
               </div>
             </div>
 
@@ -984,27 +969,6 @@ function App() {
                 </>
               )}
             </aside>
-
-            <div className="stats-card hero-stats" aria-label="Estado de la campaña">
-              <div className="stats-progress">
-                <div className="progress-block">
-                  <div className="progress-head">
-                    <strong>Participaciones vendidas</strong>
-                    <span className="progress-numbers">
-                      {stats.soldTickets.toLocaleString('es-CO')} /{' '}
-                      {stats.totalTickets.toLocaleString('es-CO')}
-                    </span>
-                  </div>
-                  <div className="progress-track" aria-hidden="true">
-                    <span style={{ width: `${stats.soldPercentage}%` }} />
-                  </div>
-                  <div className="progress-foot">
-                    <span>{stats.soldPercentage}% ocupado</span>
-                    <span>Disponibles: {stats.availableTickets.toLocaleString('es-CO')}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </section>
 

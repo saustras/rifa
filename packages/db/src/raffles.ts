@@ -96,6 +96,15 @@ interface CreatePublicOrderPayload {
 interface CreatePublicOrderInput {
   readonly slug: string;
   readonly payload: CreatePublicOrderPayload;
+  readonly orderId?: string;
+  readonly proof?: PublicOrderProofInput;
+}
+
+export interface PublicOrderProofInput {
+  readonly proofUrl: string;
+  readonly storageKey: string;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
 }
 
 type RaffleRow = typeof raffles.$inferSelect;
@@ -659,6 +668,8 @@ export const getPublicRaffleStatsBySlug = async (
 export const createPublicOrderForRaffle = async ({
   slug,
   payload,
+  orderId: providedOrderId,
+  proof,
 }: CreatePublicOrderInput): Promise<PublicOrderResult | null> => {
   // Get the raffle id first so we can release expired reservations before
   // computing availability.
@@ -727,7 +738,7 @@ export const createPublicOrderForRaffle = async ({
       }
 
       const customerId = randomUUID();
-      const orderId = randomUUID();
+      const orderId = providedOrderId ?? randomUUID();
       const amount = getOrderAmount(raffle, numbersRequested);
 
       await transaction.insert(customers).values({
@@ -754,6 +765,15 @@ export const createPublicOrderForRaffle = async ({
           amount: toMoneyString(amount),
           currency: raffle.currency,
           numbersRequested,
+          ...(proof
+            ? {
+                paymentProofUrl: proof.proofUrl,
+                paymentProofStorageKey: proof.storageKey,
+                paymentProofMimeType: proof.mimeType,
+                paymentProofSizeBytes: proof.sizeBytes,
+                paymentProofUploadedAt: new Date(),
+              }
+            : {}),
         })
         .returning();
 
@@ -805,6 +825,21 @@ export const createPublicOrderForRaffle = async ({
           numbers: allocated.map((item) => item.number),
         },
       });
+
+      if (proof) {
+        await transaction.insert(auditLogs).values({
+          id: randomUUID(),
+          sellerId: raffle.sellerId,
+          entityType: 'order',
+          entityId: orderId,
+          action: 'proof_uploaded',
+          afterData: {
+            storageKey: proof.storageKey,
+            mimeType: proof.mimeType,
+            sizeBytes: proof.sizeBytes,
+          },
+        });
+      }
 
       return {
         order,

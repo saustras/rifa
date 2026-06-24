@@ -72,10 +72,6 @@ export interface BuyerFormState {
 export interface CheckoutSession {
   readonly raffle: PublicRaffle;
 
-  readonly order: CreatedOrder;
-
-  readonly reservedNumbers: readonly PublicRaffleNumber[];
-
   readonly buyer: BuyerFormState;
 
   readonly quantity: number;
@@ -83,9 +79,13 @@ export interface CheckoutSession {
   readonly paymentMethods?: readonly PaymentMethod[];
 
   readonly ownerWhatsappNumber?: string;
+
+  readonly order?: CreatedOrder;
+
+  readonly reservedNumbers?: readonly PublicRaffleNumber[];
 }
 
-export type PaymentFlowStep = 'pay' | 'proof' | 'done';
+export type PaymentFlowStep = 'pay' | 'done';
 
 export interface CampaignStats {
   readonly totalTickets: number;

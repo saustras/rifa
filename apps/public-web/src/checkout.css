@@ -45,7 +45,7 @@
 
 .checkout-stepper {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 12px;
   list-style: none;
   padding: 0;
@@ -108,6 +108,66 @@
   grid-template-columns: minmax(260px, 340px) 1fr;
   gap: 24px;
   align-items: start;
+}
+
+.checkout-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.payment-method-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card-lg);
+  box-shadow: var(--shadow-md);
+  padding: 16px;
+}
+
+.payment-method-selector-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.payment-method-btn {
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.payment-method-btn:hover {
+  border-color: var(--navy-700);
+  background: #fff;
+}
+
+.payment-method-btn.is-active {
+  border-color: var(--navy-800);
+  background: var(--navy-800);
+  box-shadow: var(--shadow-sm);
+  color: #fff;
+}
+
+.payment-method-btn.is-active:hover {
+  border-color: var(--navy-800);
+  background: var(--navy-800);
+  color: #fff;
 }
 
 .checkout-summary-card,
@@ -331,6 +391,20 @@
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.55;
+}
+
+.checkout-card .pay-method-card {
+  margin-bottom: 20px;
+}
+
+.checkout-card .proof-form {
+  margin-top: 4px;
+}
+
+.checkout-card .btn-primary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .instruction-steps li + li {

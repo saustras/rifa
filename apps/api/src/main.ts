@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 
 import {
@@ -2409,10 +2409,46 @@ const handlePublicRaffles = async (
         return true;
       }
 
+      const { proof: proofInput, ...orderPayload } = parsed.data;
+      const orderId = randomUUID();
+      let proofMeta:
+        | {
+            readonly proofUrl: string;
+            readonly storageKey: string;
+            readonly mimeType: string;
+            readonly sizeBytes: number;
+          }
+        | undefined;
+
+      if (proofInput) {
+        try {
+          const inputImage = decodeBase64Image(proofInput.dataBase64);
+          const compressedImage = await compressPaymentProof(inputImage);
+          const persisted = await persistCompressedProof(orderId, compressedImage);
+          proofMeta = {
+            proofUrl: persisted.proofUrl,
+            storageKey: persisted.storageKey,
+            mimeType: COMPRESSED_PROOF_MIME_TYPE,
+            sizeBytes: compressedImage.byteLength,
+          };
+        } catch (error: unknown) {
+          sendJson(response, 400, {
+            error: 'invalid_proof_image',
+            message: toSafeErrorMessage(error),
+          });
+          return true;
+        }
+      }
+
       let data: Awaited<ReturnType<typeof createPublicOrderForRaffle>>;
 
       try {
-        data = await createPublicOrderForRaffle({ slug, payload: parsed.data });
+        data = await createPublicOrderForRaffle({
+          slug,
+          payload: orderPayload,
+          orderId,
+          ...(proofMeta ? { proof: proofMeta } : {}),
+        });
       } catch (error: unknown) {
         sendPublicOrderError(response, error, pathname);
         return true;
@@ -2432,6 +2468,18 @@ const handlePublicRaffles = async (
           currency: data.order.currency,
         },
       });
+
+      if (proofMeta) {
+        void notifySellerPaymentProofUploaded({
+          sellerId: data.order.sellerId,
+          orderId: data.order.id,
+          raffleId: data.order.raffleId,
+        });
+        broadcastToSeller(data.order.sellerId, {
+          type: 'order_proof',
+          data: { orderId: data.order.id },
+        });
+      }
 
       sendJson(response, 201, { data });
       return true;

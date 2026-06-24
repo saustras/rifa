@@ -349,27 +349,33 @@ h4 {
   opacity: 0.5;
 }
 
-/* Hero stage: moto | copy | purchase (2 rows) */
+/* Hero stage: promo (moto + copy) | purchase */
 .hero-stage {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(300px, 1.05fr) minmax(280px, 1fr) minmax(300px, 360px);
-  grid-template-rows: auto auto;
-  grid-template-areas:
-    'visual copy purchase'
-    'stats stats purchase';
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-areas: 'promo purchase';
+  gap: 28px;
+  align-items: stretch;
+}
+
+.hero-promo {
+  grid-area: promo;
+  display: grid;
+  grid-template-columns: minmax(280px, 1.05fr) minmax(260px, 1fr);
   gap: 20px 28px;
-  align-items: start;
+  align-items: stretch;
+  min-height: 100%;
 }
 
 .hero-visual {
-  grid-area: visual;
   position: relative;
-  min-height: 340px;
+  min-height: 360px;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 0 0;
+  padding: 8px 0;
 }
 
 .hero-curve {
@@ -420,8 +426,72 @@ h4 {
 }
 
 .hero-copy {
-  grid-area: copy;
-  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 22px;
+  min-height: 100%;
+  padding: 8px 0;
+}
+
+.hero-copy-intro {
+  display: flex;
+  flex-direction: column;
+}
+
+.hero-highlights {
+  list-style: none;
+  margin: 0;
+  padding: 22px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  justify-content: center;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.hero-highlight-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.hero-highlight-index {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--navy-800);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  box-shadow: 0 6px 16px rgba(6, 27, 63, 0.18);
+}
+
+.hero-highlight-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.hero-highlight-body strong {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--navy-800);
+  line-height: 1.3;
+}
+
+.hero-highlight-body p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .badge {
@@ -453,12 +523,12 @@ h4 {
 }
 
 .hero-title {
-  margin: 18px 0 12px;
+  margin: 18px 0 14px;
   font-weight: 900;
   font-size: clamp(38px, 3.8vw, 58px);
   line-height: 1.08;
   color: var(--navy-800);
-  max-width: 420px;
+  max-width: 460px;
 }
 
 .hero-title .accent {
@@ -466,11 +536,11 @@ h4 {
 }
 
 .hero-subtitle {
-  margin: 0 0 22px;
-  max-width: 400px;
+  margin: 0;
+  max-width: 440px;
   color: var(--text-muted);
-  font-size: 15px;
-  line-height: 1.55;
+  font-size: 16px;
+  line-height: 1.6;
   font-weight: 500;
 }
 
@@ -478,22 +548,22 @@ h4 {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 10px;
-  max-width: 320px;
+  max-width: 100%;
 }
 
 .trust-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 14px 8px 12px;
+  padding: 16px 10px 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
   text-align: center;
   box-shadow: 0 2px 8px rgba(7, 23, 53, 0.04);
-  min-height: 88px;
-  justify-content: flex-start;
+  min-height: 96px;
+  justify-content: center;
 }
 
 .trust-card strong {
@@ -1614,12 +1684,15 @@ h4 {
 
 @media (max-width: 1180px) {
   .hero-stage {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     grid-template-areas:
-      'visual copy'
-      'purchase purchase'
-      'stats stats';
-    gap: 20px;
+      'promo'
+      'purchase';
+    gap: 24px;
+  }
+
+  .hero-promo {
+    grid-template-columns: 1fr 1fr;
   }
 
   .purchase-card {
@@ -1683,10 +1756,13 @@ h4 {
   .hero-stage {
     grid-template-columns: 1fr;
     grid-template-areas:
-      'visual'
-      'copy'
-      'purchase'
-      'stats';
+      'promo'
+      'purchase';
+    gap: 20px;
+  }
+
+  .hero-promo {
+    grid-template-columns: 1fr;
     gap: 20px;
   }
 
@@ -1697,6 +1773,13 @@ h4 {
 
   .hero-copy {
     padding-top: 0;
+    min-height: auto;
+    gap: 18px;
+  }
+
+  .hero-highlights {
+    padding: 18px 0;
+    flex: none;
   }
 
   .hero-title {

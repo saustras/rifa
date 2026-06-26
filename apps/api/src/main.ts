@@ -376,8 +376,14 @@ const decodeBase64Image = (dataBase64: string): Buffer => {
   return Buffer.from(base64Body, 'base64');
 };
 
-const compressPaymentProof = async (input: Buffer): Promise<Buffer> =>
-  sharp(input, { limitInputPixels: 16_000_000 })
+const isLikelyBlankImage = async (input: Buffer): Promise<boolean> => {
+  const stats = await sharp(input).stats();
+
+  return stats.channels.every((channel) => channel.mean < 8 && channel.stdev < 6 && channel.max < 24);
+};
+
+const compressPaymentProof = async (input: Buffer): Promise<Buffer> => {
+  const compressed = await sharp(input, { limitInputPixels: 16_000_000 })
     .rotate()
     .resize({
       width: 1200,
@@ -387,6 +393,13 @@ const compressPaymentProof = async (input: Buffer): Promise<Buffer> =>
     })
     .webp({ quality: 45, effort: 6 })
     .toBuffer();
+
+  if (await isLikelyBlankImage(compressed)) {
+    throw new Error('La imagen del comprobante llegó vacía o ilegible. Vuelve a subirla.');
+  }
+
+  return compressed;
+};
 
 const compressCampaignCover = async (
   input: Buffer,

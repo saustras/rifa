@@ -80,7 +80,7 @@ export const submitPublicOrderWithProof = async ({
   readonly order: CreatedOrder;
   readonly reservedNumbers: readonly PublicRaffleNumber[];
 }> => {
-  const prepared = await prepareImageForUpload(proofFile);
+  const prepared = await prepareImageForUpload(proofFile, 'comprobante');
 
   const response = await requestJson<{
     readonly data: {
@@ -210,7 +210,7 @@ export const fetchPublicWinnersContent = async (
 };
 
 export const uploadPaymentProof = async (orderId: string, file: File): Promise<void> => {
-  const prepared = await prepareImageForUpload(file);
+  const prepared = await prepareImageForUpload(file, 'comprobante');
   await requestJson(`/api/public/orders/${orderId}/proof`, {
     method: 'POST',
     body: JSON.stringify({

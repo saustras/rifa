@@ -5,6 +5,8 @@ export type {
   SellerSettings,
 } from './landing-config';
 export { DEFAULT_LANDING_CONFIG, DEFAULT_SELLER_SETTINGS } from './landing-config';
+export { prepareImageForUpload } from './prepare-image-for-upload';
+export type { PreparedImage } from './prepare-image-for-upload';
 
 export const RAFFLE_STATUSES = {
   draft: 'draft',

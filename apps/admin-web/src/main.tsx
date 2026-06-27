@@ -28,6 +28,11 @@ import {
   type OrderListRow,
   type RequestStatus,
 } from './types';
+import {
+  alertNewPurchase,
+  ensureNotificationPermission,
+  primeNotificationAudio,
+} from './notifications';
 import { getMetrics } from './utils';
 import './styles.css';
 
@@ -80,6 +85,8 @@ function App() {
   const [message, setMessage] = useState<string>('');
   const [sseNotification, setSseNotification] = useState<string>('');
   const sseSourceRef = useRef<EventSource | null>(null);
+  const purchaseAlertTimerRef = useRef<number | undefined>(undefined);
+  const pendingPurchaseAlertRef = useRef<{ readonly toast: string; readonly title: string; readonly body: string } | null>(null);
 
   const loadData = useCallback(async (): Promise<void> => {
     if (!session) {
@@ -117,6 +124,15 @@ function App() {
     void loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    primeNotificationAudio();
+    void ensureNotificationPermission();
+  }, [session]);
+
   // Keep a stable reference to the latest loadData so SSE handlers can refresh
   // without forcing the connection to be torn down and re-created.
   const loadDataRef = useRef(loadData);
@@ -153,6 +169,34 @@ function App() {
       }, 400);
     };
 
+    const schedulePurchaseAlert = (
+      toastMessage: string,
+      notificationTitle: string,
+      notificationBody: string,
+    ) => {
+      pendingPurchaseAlertRef.current = {
+        toast: toastMessage,
+        title: notificationTitle,
+        body: notificationBody,
+      };
+
+      if (purchaseAlertTimerRef.current) {
+        window.clearTimeout(purchaseAlertTimerRef.current);
+      }
+
+      purchaseAlertTimerRef.current = window.setTimeout(() => {
+        const alert = pendingPurchaseAlertRef.current;
+
+        if (!alert) {
+          return;
+        }
+
+        setSseNotification(alert.toast);
+        alertNewPurchase(alert.title, alert.body);
+        pendingPurchaseAlertRef.current = null;
+      }, 700);
+    };
+
     const connect = () => {
       if (isCancelled) {
         return;
@@ -164,15 +208,28 @@ function App() {
       source.addEventListener('new_order', (event) => {
         try {
           const payload = JSON.parse(event.data) as { readonly amount?: string };
-          setSseNotification(`Nueva orden por ${formatSseAmount(payload.amount ?? '0')} COP`);
+          const amountLabel = formatSseAmount(payload.amount ?? '0');
+          schedulePurchaseAlert(
+            `Nueva compra por ${amountLabel} COP`,
+            'Nueva compra recibida',
+            `Hay una compra por ${amountLabel} COP pendiente de revisión.`,
+          );
         } catch {
-          setSseNotification('Nueva orden recibida');
+          schedulePurchaseAlert(
+            'Nueva compra recibida',
+            'Nueva compra recibida',
+            'Hay una compra pendiente de revisión.',
+          );
         }
         scheduleRefresh();
       });
 
       source.addEventListener('order_proof', () => {
-        setSseNotification('Nuevo comprobante recibido');
+        schedulePurchaseAlert(
+          'Nuevo comprobante recibido',
+          'Comprobante de pago recibido',
+          'Un cliente subió el comprobante. Revisa la compra para aprobar o rechazar.',
+        );
         scheduleRefresh();
       });
 
@@ -217,6 +274,10 @@ function App() {
         window.clearTimeout(refreshTimer);
       }
 
+      if (purchaseAlertTimerRef.current) {
+        window.clearTimeout(purchaseAlertTimerRef.current);
+      }
+
       if (sseSourceRef.current) {
         sseSourceRef.current.close();
         sseSourceRef.current = null;
@@ -246,6 +307,8 @@ function App() {
 
     try {
       const nextSession = await loginAdmin({ username: loginUsername, password: loginPassword });
+      primeNotificationAudio();
+      void ensureNotificationPermission();
       setSession(nextSession);
       setLoginPassword('');
       setLoginStatus(REQUEST_STATUS.success);

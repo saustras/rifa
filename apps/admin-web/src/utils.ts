@@ -39,13 +39,19 @@ export const getMetrics = (orders: readonly OrderListRow[]): OrdersMetrics => {
 
   return {
     total: orders.length,
-    pending: orders.filter((order) => order.status === ORDER_STATUS.pendingReview).length,
+    pending: getActionablePendingCount(orders),
     paid: paidOrders.length,
     revenue: paidOrders.reduce((total, order) => total + Number(order.amount), 0),
     participationsSold: paidOrders.reduce((total, order) => total + order.numbersRequested, 0),
     todayRevenue: todayPaid.reduce((total, order) => total + Number(order.amount), 0),
   };
 };
+
+export const getActionablePendingCount = (orders: readonly OrderListRow[]): number =>
+  orders.filter(
+    (order) =>
+      order.status === ORDER_STATUS.pendingReview && Boolean(order.paymentProofStorageKey),
+  ).length;
 
 export const getRaffleProgress = (
   orders: readonly OrderListRow[],

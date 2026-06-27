@@ -151,6 +151,31 @@ export const AdminShell = ({
             </p>
           </div>
           <div className="topbar-actions">
+            <button
+              type="button"
+              className="notification-bell"
+              aria-label={
+                pendingCount > 0
+                  ? `${pendingCount} compras pendientes de revisión`
+                  : 'Sin compras pendientes'
+              }
+              onClick={() => onNavigate('orders')}
+            >
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M15 17H9c0 1.66 1.34 3 3 3s3-1.34 3-3ZM18 8a6 6 0 10-12 0c0 5-2 5-2 8h12c0-3-2-3-2-8Z"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              {pendingCount > 0 ? (
+                <span className="notification-bell-badge">
+                  {pendingCount > 99 ? '99+' : pendingCount}
+                </span>
+              ) : null}
+            </button>
             <a className="btn btn-ghost" href={landingHref} target="_blank" rel="noreferrer">
               Ver landing
             </a>
